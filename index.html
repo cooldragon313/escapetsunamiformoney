@@ -53,6 +53,64 @@
           color:#aaa; line-height: 1.7; max-width: 720px; }
   kbd { background:#333; padding: 1px 6px; border-radius:3px; color:#fff;
         border:1px solid #555; font-family: inherit; font-size: 11px; }
+  /* ===== Menu / overlays (title / creator / tutorial) ===== */
+  .overlay { position: fixed; inset: 0; z-index: 2000;
+             display: flex; align-items: center; justify-content: center;
+             background: rgba(0,0,0,0.88);
+             color: #fff; font-family: monospace; padding: 20px;
+             box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+  .overlay.hidden { display: none; }
+  .overlay-card { max-width: 560px; width: 100%;
+                  background: rgba(20,30,50,0.96);
+                  border: 3px solid #4a8acf;
+                  padding: 26px 30px;
+                  box-shadow: 0 0 40px rgba(74,138,207,0.3);
+                  max-height: 88vh; overflow-y: auto; }
+  .overlay h1 { margin: 0 0 6px; font-size: 30px; color: #ffd700;
+                text-align: center; letter-spacing: 6px; }
+  .overlay h2 { margin: 0 0 14px; font-size: 22px; color: #ffd700;
+                text-align: center; letter-spacing: 4px; }
+  .overlay .subtitle { color: #88aaff; text-align: center; font-size: 12px;
+                       letter-spacing: 8px; margin-bottom: 24px; }
+  .overlay p { line-height: 1.7; color: #cfd8e8; }
+  .overlay .lore { font-size: 15px; line-height: 2.0; color: #ffe8a0;
+                   margin: 20px 0; padding: 14px 16px;
+                   border-left: 3px solid #ffd700;
+                   background: rgba(255,215,0,0.05); }
+  .overlay button { display: block; margin: 22px auto 0;
+                    padding: 12px 30px; font-size: 17px; font-weight: bold;
+                    background: #4a8acf; color: white;
+                    border: 2px solid #88c0ff; cursor: pointer;
+                    font-family: monospace; letter-spacing: 2px; }
+  .overlay button:hover { background: #5a9adf; }
+  .creator-row { display: flex; align-items: center; gap: 10px;
+                 margin: 10px 0; flex-wrap: wrap; }
+  .creator-row > label { width: 60px; font-size: 13px; color: #aaa; flex: none; }
+  .creator-row input[type=text] { flex: 1; padding: 8px 12px;
+                                  font-size: 16px; font-family: monospace;
+                                  background: rgba(0,0,0,0.4);
+                                  border: 1px solid #4a8acf; color: white;
+                                  outline: none; }
+  .swatches { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
+  .swatch { width: 30px; height: 30px; border: 2px solid #444; cursor: pointer;
+            box-sizing: border-box; }
+  .swatch.style { width: auto; padding: 4px 12px; background: rgba(0,0,0,0.4);
+                  color: #fff; display:flex; align-items:center; justify-content:center;
+                  font-size: 14px; line-height: 1; }
+  .swatch.selected { border-color: #ffd700;
+                     box-shadow: 0 0 8px rgba(255,215,0,0.7); }
+  #tutorial-text { font-size: 16px; line-height: 1.8; min-height: 80px;
+                   color: #fff; padding: 16px; background: rgba(0,0,0,0.3);
+                   border-left: 3px solid #88aaff; }
+  #tutorial-pager { text-align: center; color: #888; margin-top: 14px;
+                    font-size: 12px; letter-spacing: 4px; }
+  body.menu-mode #touch-controls,
+  body.menu-mode #hud,
+  body.menu-mode #help,
+  body.menu-mode #zone-tag,
+  body.menu-mode #hilltop-prompt,
+  body.menu-mode #warn,
+  body.menu-mode #toast { display: none !important; }
   /* ===== Touch controls (mobile/tablet) ===== */
   #touch-controls { display: none; }
   body.touch-mode #touch-controls { display: block; }
@@ -106,6 +164,75 @@
 </head>
 <body>
 <div id="stage"></div>
+
+<div id="title-screen" class="overlay">
+  <div class="overlay-card">
+    <h1>ESCAPE TSUNAMI</h1>
+    <div class="subtitle">FOR MONEY</div>
+    <div class="lore">
+      傳說大海嘯之國的盡頭，沉著一筆無人能取的寶藏。<br><br>
+      無數英雄前來，沒有一個從第五區活著回來。<br>
+      山頂上的老人說：「那是給最英勇者的禮物。」<br><br>
+      <strong>你能跑到 1000 公尺嗎？</strong>
+    </div>
+    <button id="title-continue">開始冒險 →</button>
+  </div>
+</div>
+
+<div id="creator-screen" class="overlay hidden">
+  <div class="overlay-card">
+    <h2>創建你的英雄</h2>
+    <div class="creator-row">
+      <label>名字</label>
+      <input id="name-input" type="text" maxlength="12" placeholder="勇者">
+    </div>
+    <div class="creator-row">
+      <label>髮型</label>
+      <div class="swatches" data-field="hair">
+        <span class="swatch style" data-val="short">短髮</span>
+        <span class="swatch style" data-val="cap">帽子</span>
+        <span class="swatch style" data-val="spiky">尖刺</span>
+      </div>
+    </div>
+    <div class="creator-row">
+      <label>髮色</label>
+      <div class="swatches" data-field="hairColor"></div>
+    </div>
+    <div class="creator-row">
+      <label>表情</label>
+      <div class="swatches" data-field="expression">
+        <span class="swatch style" data-val="smile">笑</span>
+        <span class="swatch style" data-val="neutral">嚴肅</span>
+      </div>
+    </div>
+    <div class="creator-row">
+      <label>膚色</label>
+      <div class="swatches" data-field="skin"></div>
+    </div>
+    <div class="creator-row">
+      <label>上衣</label>
+      <div class="swatches" data-field="shirt"></div>
+    </div>
+    <div class="creator-row">
+      <label>褲子</label>
+      <div class="swatches" data-field="pants"></div>
+    </div>
+    <div class="creator-row">
+      <label>鞋子</label>
+      <div class="swatches" data-field="shoes"></div>
+    </div>
+    <button id="start-game">▶ 進入大海嘯之國</button>
+  </div>
+</div>
+
+<div id="tutorial-screen" class="overlay hidden">
+  <div class="overlay-card">
+    <h2>新手提示</h2>
+    <div id="tutorial-text"></div>
+    <div id="tutorial-pager"></div>
+    <button id="tutorial-next">下一步</button>
+  </div>
+</div>
 
 <div id="hud">
   <div class="row"><span class="label">$ 存款</span><span class="value gold" id="money">0</span></div>
@@ -381,19 +508,64 @@ function spawnPits(){
 spawnPits();
 
 // ============================================================
-// PLAYER
+// PLAYER (rebuildable from customization)
 // ============================================================
-const player = new THREE.Group();
-const torso = mk(1.2, 1.3, 0.7, 0xd04040); torso.position.y = 1.55; player.add(torso);
-const head  = mk(0.9, 0.9, 0.9, 0xf0c090); head.position.y = 2.65;  player.add(head);
-const hair  = mk(0.92, 0.35, 0.92, 0x3a2a1a); hair.position.y = 2.95; player.add(hair);
-const legL  = mk(0.45, 1, 0.55, 0x1a1a4a); legL.position.set(-0.32, 0.5, 0); player.add(legL);
-const legR  = mk(0.45, 1, 0.55, 0x1a1a4a); legR.position.set( 0.32, 0.5, 0); player.add(legR);
-const armL  = mk(0.35, 1.0, 0.4, 0xf0c090); armL.position.set(-0.78, 1.6, 0); player.add(armL);
-const armR  = mk(0.35, 1.0, 0.4, 0xf0c090); armR.position.set( 0.78, 1.6, 0); player.add(armR);
-const pack  = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); player.add(pack);
-player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
-scene.add(player);
+let player, legL, legR, armL, armR;
+
+const DEFAULT_CUSTOM = {
+  name: '勇者',
+  hair: 'short',     hairColor: 0x3a2a1a,
+  expression: 'smile',
+  skin: 0xf0c090, shirt: 0xd04040, pants: 0x1a1a4a, shoes: 0x5a3a1a,
+};
+
+function buildPlayer(custom){
+  custom = custom || DEFAULT_CUSTOM;
+  if (player) scene.remove(player);
+  player = new THREE.Group();
+  // Torso
+  const torso = mk(1.2, 1.3, 0.7, custom.shirt); torso.position.y = 1.55; player.add(torso);
+  // Head
+  const head = mk(0.9, 0.9, 0.9, custom.skin); head.position.y = 2.65; player.add(head);
+  // Face features (front of head is -z; default rotation has player facing -z)
+  const eyeL = mk(0.14, 0.14, 0.05, 0x000000); eyeL.position.set(-0.2, 2.72, -0.46); player.add(eyeL);
+  const eyeR = mk(0.14, 0.14, 0.05, 0x000000); eyeR.position.set( 0.2, 2.72, -0.46); player.add(eyeR);
+  if (custom.expression === 'smile'){
+    const m  = mk(0.40, 0.07, 0.05, 0xaa3030); m.position.set(0, 2.46, -0.46); player.add(m);
+    const cl = mk(0.07, 0.12, 0.05, 0xaa3030); cl.position.set(-0.21, 2.40, -0.46); player.add(cl);
+    const cr = mk(0.07, 0.12, 0.05, 0xaa3030); cr.position.set( 0.21, 2.40, -0.46); player.add(cr);
+  } else {
+    const m = mk(0.34, 0.07, 0.05, 0x222222); m.position.set(0, 2.42, -0.46); player.add(m);
+  }
+  // Hair
+  if (custom.hair === 'short'){
+    const h = mk(0.95, 0.4, 0.95, custom.hairColor); h.position.y = 2.95; player.add(h);
+  } else if (custom.hair === 'cap'){
+    const cap  = mk(1.0, 0.4, 1.0, custom.hairColor); cap.position.y = 2.95; player.add(cap);
+    const brim = mk(1.2, 0.1, 0.6, custom.hairColor); brim.position.set(0, 2.83, -0.5); player.add(brim);
+  } else if (custom.hair === 'spiky'){
+    const base = mk(0.92, 0.2, 0.92, custom.hairColor); base.position.y = 2.85; player.add(base);
+    for (let i = -1; i <= 1; i++){
+      const sp = mk(0.22, 0.5, 0.22, custom.hairColor);
+      sp.position.set(i * 0.32, 3.2, 0); player.add(sp);
+    }
+  }
+  // Legs
+  legL = mk(0.45, 1, 0.55, custom.pants); legL.position.set(-0.32, 0.5, 0); player.add(legL);
+  legR = mk(0.45, 1, 0.55, custom.pants); legR.position.set( 0.32, 0.5, 0); player.add(legR);
+  // Arms (skin-coloured)
+  armL = mk(0.35, 1.0, 0.4, custom.skin); armL.position.set(-0.78, 1.6, 0); player.add(armL);
+  armR = mk(0.35, 1.0, 0.4, custom.skin); armR.position.set( 0.78, 1.6, 0); player.add(armR);
+  // Shoes
+  const shoeL = mk(0.5, 0.18, 0.7, custom.shoes); shoeL.position.set(-0.32, 0.09, 0.05); player.add(shoeL);
+  const shoeR = mk(0.5, 0.18, 0.7, custom.shoes); shoeR.position.set( 0.32, 0.09, 0.05); player.add(shoeR);
+  // Backpack
+  const pack = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); player.add(pack);
+
+  player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
+  scene.add(player);
+}
+buildPlayer();
 
 // ============================================================
 // TSUNAMI FACTORY
@@ -557,6 +729,9 @@ const state = {
   alive: true,
   maxDist: 0,
   spawnAccum: 0,
+  gamePhase: 'title',          // 'title' | 'creator' | 'tutorial' | 'playing'
+  custom: DEFAULT_CUSTOM,
+  tutorialStep: 0,
   nextSpawnIn: 4,             // randomized wait until next wave
   storm: false,                // storm phase active
   stormUntil: 0,
@@ -727,6 +902,8 @@ function update(now){
   const dt = Math.min(0.05, (now - lastTime) / 1000);
   lastTime = now;
   t += dt;
+
+  if (state.gamePhase === 'playing') {
 
   // ----- Input -----
   if (state.alive && !shopOpen){
@@ -917,6 +1094,8 @@ function update(now){
     }
   }
 
+  } // end if gamePhase === 'playing'
+
   // ----- Player animation -----
   const moving = state.alive && !state.inPit && (
     keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||
@@ -962,13 +1141,132 @@ function update(now){
   camera.position.z += (camTargetZ - camera.position.z) * 0.1;
   camera.lookAt(player.position.x, player.position.y + 1.5, player.position.z - 5);
 
-  updateHUD();
+  if (state.gamePhase === 'playing') updateHUD();
   renderer.render(scene, camera);
   requestAnimationFrame(update);
 }
 
 applyStats();
 updateHUD();
+
+// ============================================================
+// MENUS: title / character creator / tutorial
+// ============================================================
+const PALETTES = {
+  hairColor: [0x111111, 0x3a2a1a, 0x8B4513, 0xddaa44, 0xc04040, 0x4040c0, 0xff66aa, 0xeeeeee],
+  skin:      [0xfdd4a8, 0xf0c090, 0xd49773, 0xa66e3e, 0x6e3e1a, 0x88aa44, 0xaaccff],
+  shirt:     [0xd04040, 0x4080d0, 0x40a040, 0xddcc40, 0xa040b0, 0xe06030, 0x303030, 0xeeeeee],
+  pants:     [0x1a1a4a, 0x111111, 0x4a3a1a, 0x6a6a6a, 0x40a040, 0x80501a],
+  shoes:     [0x111111, 0x4a3a1a, 0xc04040, 0xeeeeee, 0xddaa44, 0x4080d0],
+};
+const TUTORIAL_STEPS = [
+  '用 WASD（或左下搖桿）跑出基地，撿沿途的金幣。深區金幣更值錢。',
+  '看到「海嘯警報」就反應：綠色矮浪 → 跳躍越過；紫色巨浪 / 黑色災難 → 必須躲坑。',
+  '坑緣有顏色，標示需要的跳高 Lv：棕（任何人）/ 綠 Lv 1 / 藍 Lv 2 / 紫 Lv 3 / 紅 Lv 4。',
+  '跳高不夠的坑會被擋下，不會把你關住，但也不會擋浪 — 在山頂商店升級跳高才能用深區的坑。',
+  '活著回到山頂（金色光柱）→ 自動把背包換成存款。按 B 開商店升級裝備。',
+  '死了寶藏會掉在原地變大金箱，下一條命可以回去撿（不佔背包格）。',
+];
+
+function setMenuMode(on){
+  document.body.classList.toggle('menu-mode', on);
+}
+function show(id){ document.getElementById(id).classList.remove('hidden'); }
+function hide(id){ document.getElementById(id).classList.add('hidden'); }
+
+// Load saved customization
+try {
+  const saved = JSON.parse(localStorage.getItem('etfm-custom') || 'null');
+  if (saved) state.custom = { ...DEFAULT_CUSTOM, ...saved };
+} catch(e) {}
+
+setMenuMode(true);
+
+// --- Build palette swatches ---
+for (const field of Object.keys(PALETTES)){
+  const container = document.querySelector(`.swatches[data-field="${field}"]`);
+  if (!container) continue;
+  PALETTES[field].forEach(hex => {
+    const s = document.createElement('span');
+    s.className = 'swatch';
+    s.style.background = '#' + hex.toString(16).padStart(6, '0');
+    s.dataset.val = String(hex);
+    container.appendChild(s);
+  });
+}
+
+function applyCustomToUI(){
+  document.getElementById('name-input').value = state.custom.name || '';
+  document.querySelectorAll('.swatches').forEach(group => {
+    const field = group.dataset.field;
+    const val = String(state.custom[field]);
+    group.querySelectorAll('.swatch').forEach(s => {
+      s.classList.toggle('selected', s.dataset.val === val);
+    });
+  });
+}
+
+// --- Swatch click handling ---
+document.querySelectorAll('.swatches').forEach(group => {
+  const field = group.dataset.field;
+  group.addEventListener('click', e => {
+    const sw = e.target.closest('.swatch');
+    if (!sw) return;
+    group.querySelectorAll('.swatch').forEach(s => s.classList.remove('selected'));
+    sw.classList.add('selected');
+    const v = sw.dataset.val;
+    const num = parseInt(v, 10);
+    state.custom[field] = (!isNaN(num) && String(num) === v) ? num : v;
+  });
+});
+
+// --- Title -> Creator ---
+document.getElementById('title-continue').addEventListener('click', () => {
+  hide('title-screen');
+  show('creator-screen');
+  state.gamePhase = 'creator';
+  applyCustomToUI();
+});
+
+// --- Creator -> Tutorial / Play ---
+document.getElementById('start-game').addEventListener('click', () => {
+  const name = document.getElementById('name-input').value.trim() || '勇者';
+  state.custom.name = name;
+  localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
+  buildPlayer(state.custom);
+  hide('creator-screen');
+  if (localStorage.getItem('etfm-tutorial') === 'yes'){
+    state.gamePhase = 'playing';
+    setMenuMode(false);
+  } else {
+    state.gamePhase = 'tutorial';
+    state.tutorialStep = 0;
+    show('tutorial-screen');
+    renderTutorialStep();
+  }
+});
+
+// --- Tutorial ---
+function renderTutorialStep(){
+  const txt   = document.getElementById('tutorial-text');
+  const pager = document.getElementById('tutorial-pager');
+  const btn   = document.getElementById('tutorial-next');
+  txt.textContent = TUTORIAL_STEPS[state.tutorialStep];
+  pager.textContent = `${state.tutorialStep + 1} / ${TUTORIAL_STEPS.length}`;
+  btn.textContent = state.tutorialStep === TUTORIAL_STEPS.length - 1 ? '開始遊戲' : '下一步';
+}
+document.getElementById('tutorial-next').addEventListener('click', () => {
+  if (state.tutorialStep < TUTORIAL_STEPS.length - 1){
+    state.tutorialStep++;
+    renderTutorialStep();
+  } else {
+    hide('tutorial-screen');
+    localStorage.setItem('etfm-tutorial', 'yes');
+    state.gamePhase = 'playing';
+    setMenuMode(false);
+  }
+});
+
 requestAnimationFrame(update);
 </script>
 </body>
