@@ -733,6 +733,8 @@ const state = {
   custom: DEFAULT_CUSTOM,
   tutorialStep: 0,
   nextSpawnIn: 4,             // randomized wait until next wave
+  coinRefreshAccum: 0,
+  lastExitedPit: null,
   storm: false,                // storm phase active
   stormUntil: 0,
   stormCooldownUntil: 25,      // earliest time (in t-seconds) for first storm
@@ -988,17 +990,22 @@ function update(now){
 
   // ----- Coin pickup -----
   if (state.alive){
-    const lootMul = state.storm ? 2 : 1;     // storm doubles bag value of fresh pickups
+    const lootMul = state.storm ? 2 : 1;
     for (const c of coins){
       if (c.collected) continue;
       const dx = player.position.x - c.x;
       const dz = player.position.z - c.z;
       if (dx*dx + dz*dz < state.pickupRadius * state.pickupRadius){
         if (c.dropped){
-          state.money += c.value;
-          c.collected = true;
-          scene.remove(c.mesh);
-          toast(`找回寶藏 +$${c.value}`);
+          // Dropped death chest takes 1 bag slot but holds its full value;
+          // must still be brought back to base
+          if (state.bag < state.carryMax){
+            state.bag += 1;
+            state.bagValue += c.value;
+            c.collected = true;
+            scene.remove(c.mesh);
+            toast(`找回死亡寶藏 +$${c.value}（帶回山頂存款）`);
+          }
         } else if (state.bag < state.carryMax){
           state.bag += 1;
           state.bagValue += c.value * lootMul;
@@ -1026,6 +1033,22 @@ function update(now){
     hud.hilltopPrompt.classList.add('show');
   } else {
     hud.hilltopPrompt.classList.remove('show');
+  }
+
+  // ----- Coin replenishment (every 60s, restore picked-up coins; not chests) -----
+  state.coinRefreshAccum += dt;
+  if (state.coinRefreshAccum > 60){
+    state.coinRefreshAccum = 0;
+    let n = 0;
+    for (const c of coins){
+      if (c.collected && !c.dropped){
+        c.mesh.position.set(c.x, 0.7, c.z);
+        scene.add(c.mesh);
+        c.collected = false;
+        n++;
+      }
+    }
+    if (n > 0) toast(`💰 金幣補充 +${n} 個`);
   }
 
   // ----- Storm system: occasional flurry with bonus loot -----
