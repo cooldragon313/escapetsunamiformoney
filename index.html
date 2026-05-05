@@ -223,7 +223,7 @@ const UPGRADE_DEF = [
 // ============================================================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 250, 1300);
+scene.fog = new THREE.Fog(0x87ceeb, 200, 4000);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1500);
 camera.position.set(0, 6, BASE_Z + 2);
@@ -401,24 +401,41 @@ function createTsunami(waveType){
   const g = new THREE.Group();
   const wallH = waveType.height;
   const wallW = waveType.width;
-  const wall = mk(wallW, wallH, 4, waveType.color);
+  // Self-lit material so the wave is visible at distance / against bright sky
+  const wallMat = new THREE.MeshLambertMaterial({
+    color: waveType.color,
+    emissive: waveType.color,
+    emissiveIntensity: 0.55
+  });
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(wallW, wallH, 4), wallMat);
   wall.position.y = wallH/2;
   g.add(wall);
-  // dark base accent
+  // Tall thin "fin" above the wave so even short waves cast a visible silhouette from far
+  const finH = Math.max(5, wallH * 0.6);
+  const fin = new THREE.Mesh(
+    new THREE.BoxGeometry(wallW * 0.95, finH, 1.0),
+    new THREE.MeshLambertMaterial({ color: waveType.color, emissive: waveType.color, emissiveIntensity: 0.7, fog: false })
+  );
+  fin.position.y = wallH + finH/2;
+  g.add(fin);
+  // Dark base accent
   const dark = mk(wallW + 0.1, Math.min(1.2, wallH * 0.4), 4.1, 0x0d2540);
   dark.position.y = Math.min(0.6, wallH * 0.25);
   g.add(dark);
-  // foam line on top
+  // Foam line on top of fin
   const foam = [];
   const foamStep = 1.4;
   for (let i = -wallW/2; i <= wallW/2; i += foamStep){
-    const f = mk(foamStep, Math.min(1.0, wallH * 0.3), 4.4, 0xffffff);
-    f.position.set(i, wallH + 0.4, 0);
+    const f = new THREE.Mesh(
+      new THREE.BoxGeometry(foamStep, Math.max(1.0, wallH * 0.25), 1.4),
+      new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.6, fog: false })
+    );
+    f.position.set(i, wallH + finH + 0.3, 0);
     f.userData = { phase: i * 0.3 };
     g.add(f);
     foam.push(f);
   }
-  return { group:g, foam, wallH, wallW };
+  return { group:g, foam, wallH, wallW, finH };
 }
 
 const tsunamis = [];
@@ -605,7 +622,7 @@ function showWarn(waveType){
   hud.warn.style.color = color;
   hud.warn.classList.add('show');
   clearTimeout(warnTimer);
-  warnTimer = setTimeout(() => hud.warn.classList.remove('show'), 1500);
+  warnTimer = setTimeout(() => hud.warn.classList.remove('show'), 2500);
 }
 
 let toastTimer = null;
@@ -878,8 +895,9 @@ function update(now){
     }
     if (ts.state === 'warning' && performance.now() > ts.warnUntil) ts.state = 'advancing';
     // foam undulation
+    const foamBaseY = ts.obj.wallH + ts.obj.finH + 0.3;
     ts.obj.foam.forEach(f => {
-      f.position.y = ts.obj.wallH + 0.4 + Math.sin(t * 4 + f.userData.phase) * 0.3;
+      f.position.y = foamBaseY + Math.sin(t * 4 + f.userData.phase) * 0.3;
     });
     // collision: must be inside both z-band AND x-band; jumpable waves can be cleared by jumping above height
     if (state.alive && player.position.z < SAFETY_LINE_Z && !state.inPit){
