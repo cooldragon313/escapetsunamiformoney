@@ -886,6 +886,7 @@ function killPlayer(){
     player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
     state.vy = 0;
     state.inPit = null;
+    state.lastExitedPit = null;
     state.alive = true;
     hud.death.classList.remove('show');
     updateHUD();
@@ -950,27 +951,35 @@ function update(now){
   // ----- Pit gate (jump level must be high enough to use deep pits) -----
   if (state.alive && !state.inPit && player.position.y < 0.5){
     for (const p of pits){
+      if (p === state.lastExitedPit) continue;     // prevents instant re-entry
       const dx = (player.position.x - p.x) / p.rx;
       const dz = (player.position.z - p.z) / p.rz;
       if (dx*dx + dz*dz < 1){
         if (state.upgrades.jump < (p.jumpReq ?? 0)){
-          // Block entry; surface a (rate-limited) hint instead of trapping the player
           if (performance.now() - (state.lastBlockedPitToast ?? 0) > 1800){
             toast(`此坑需要跳高 Lv ${p.jumpReq}（目前 Lv ${state.upgrades.jump}）`);
             state.lastBlockedPitToast = performance.now();
           }
         } else {
           state.inPit = p;
-          state.pitUntil = performance.now() + 3000;     // short fixed shelter time
+          state.pitUntil = performance.now() + 3000;
           player.position.y = -1.4;
           toast('躲進坑');
         }
         break;
       }
     }
+    // Clear the "just exited" lock once the player has walked outside that pit
+    if (state.lastExitedPit){
+      const p = state.lastExitedPit;
+      const dx = (player.position.x - p.x) / p.rx;
+      const dz = (player.position.z - p.z) / p.rz;
+      if (dx*dx + dz*dz >= 1) state.lastExitedPit = null;
+    }
   }
   if (state.inPit){
     if (performance.now() > state.pitUntil){
+      state.lastExitedPit = state.inPit;
       state.inPit = null;
       player.position.y = groundY(player.position.z);
       toast('爬出坑洞');
