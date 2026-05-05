@@ -2,6 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Escape Tsunami — 3D 方塊版 MVP</title>
 <style>
   body { margin:0; background:#000; color:#eee; font-family: monospace; overflow:hidden; }
@@ -52,6 +53,40 @@
           color:#aaa; line-height: 1.7; max-width: 720px; }
   kbd { background:#333; padding: 1px 6px; border-radius:3px; color:#fff;
         border:1px solid #555; font-family: inherit; font-size: 11px; }
+  /* ===== Touch controls (mobile/tablet) ===== */
+  #touch-controls { display: none; }
+  body.touch-mode #touch-controls { display: block; }
+  body.touch-mode #help { display: none; }
+  #stick { position: fixed; left: 24px; bottom: 24px;
+           width: 150px; height: 150px;
+           background: rgba(255,255,255,0.08);
+           border: 3px solid rgba(255,255,255,0.35);
+           border-radius: 50%;
+           touch-action: none; user-select: none; -webkit-user-select: none;
+           z-index: 100; }
+  #stick-knob { position: absolute; left: 50%; top: 50%;
+                width: 64px; height: 64px;
+                margin-left: -32px; margin-top: -32px;
+                background: rgba(255,255,255,0.55);
+                border: 2px solid #fff;
+                border-radius: 50%;
+                pointer-events: none; }
+  .touch-btn { position: fixed; right: 28px;
+               background: rgba(40,80,160,0.55);
+               border: 3px solid rgba(180,220,255,0.7);
+               border-radius: 50%;
+               color: #fff; font-family: monospace; font-weight: bold;
+               touch-action: none; user-select: none; -webkit-user-select: none;
+               display:flex; align-items:center; justify-content:center;
+               box-shadow: 0 0 12px rgba(0,0,0,0.4); z-index: 100; }
+  .touch-btn:active, .touch-btn.pressed { background: rgba(80,140,220,0.85); }
+  #btn-jump   { bottom: 36px;  width: 92px; height: 92px; font-size: 22px; }
+  #btn-sprint { bottom: 145px; right: 50px; width: 70px; height: 70px; font-size: 16px;
+                background: rgba(180,80,40,0.55); border-color: rgba(255,180,140,0.7); }
+  #btn-sprint:active, #btn-sprint.pressed { background: rgba(220,120,60,0.85); }
+  #btn-shop   { top: 64px; right: 28px; width: 64px; height: 64px; font-size: 14px;
+                background: rgba(160,140,40,0.55); border-color: rgba(255,220,140,0.7); }
+  #btn-shop:active, #btn-shop.pressed { background: rgba(220,200,60,0.85); }
   #toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
            background: rgba(0,0,0,0.7); color:#fff; padding: 6px 16px;
            border:1px solid #555; opacity:0; transition: opacity 0.3s; font-size: 13px; pointer-events:none; }
@@ -96,6 +131,13 @@
   <div class="money-bar">持有金錢：$<span id="shop-money">0</span></div>
   <div id="shop-list"></div>
   <div class="hint">按 <kbd>B</kbd> 或 <kbd>Esc</kbd> 關閉</div>
+</div>
+
+<div id="touch-controls">
+  <div id="stick"><div id="stick-knob"></div></div>
+  <div id="btn-sprint" class="touch-btn">衝刺</div>
+  <div id="btn-jump" class="touch-btn">跳</div>
+  <div id="btn-shop" class="touch-btn">商店</div>
 </div>
 
 <div id="help">
@@ -411,6 +453,76 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
+// ----- Touch / virtual joystick -----
+const touchInput = { jx: 0, jy: 0, jump: false, sprint: false };
+const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+if (isTouchDevice) document.body.classList.add('touch-mode');
+
+const STICK_RADIUS = 55;
+const stickEl = document.getElementById('stick');
+const knobEl  = document.getElementById('stick-knob');
+let stickPointerId = null;
+let stickCenter = { x: 0, y: 0 };
+
+function setStickFromXY(x, y){
+  let dx = x - stickCenter.x;
+  let dy = y - stickCenter.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist > STICK_RADIUS){
+    dx = dx * STICK_RADIUS / dist;
+    dy = dy * STICK_RADIUS / dist;
+  }
+  touchInput.jx = dx / STICK_RADIUS;
+  touchInput.jy = dy / STICK_RADIUS;
+  knobEl.style.left = `calc(50% + ${dx}px)`;
+  knobEl.style.top  = `calc(50% + ${dy}px)`;
+}
+function resetStick(){
+  touchInput.jx = 0; touchInput.jy = 0;
+  knobEl.style.left = '50%';
+  knobEl.style.top  = '50%';
+}
+stickEl.addEventListener('pointerdown', e => {
+  if (stickPointerId !== null) return;
+  e.preventDefault();
+  stickPointerId = e.pointerId;
+  const r = stickEl.getBoundingClientRect();
+  stickCenter = { x: r.left + r.width/2, y: r.top + r.height/2 };
+  setStickFromXY(e.clientX, e.clientY);
+  stickEl.setPointerCapture(e.pointerId);
+});
+stickEl.addEventListener('pointermove', e => {
+  if (e.pointerId !== stickPointerId) return;
+  e.preventDefault();
+  setStickFromXY(e.clientX, e.clientY);
+});
+const endStick = e => {
+  if (e.pointerId !== stickPointerId) return;
+  stickPointerId = null;
+  resetStick();
+};
+stickEl.addEventListener('pointerup', endStick);
+stickEl.addEventListener('pointercancel', endStick);
+stickEl.addEventListener('pointerleave', endStick);
+
+function bindTouchButton(id, onPress, onRelease){
+  const el = document.getElementById(id);
+  const press = e => { e.preventDefault(); el.classList.add('pressed'); onPress && onPress(); };
+  const release = e => { e.preventDefault(); el.classList.remove('pressed'); onRelease && onRelease(); };
+  el.addEventListener('pointerdown', press);
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+  el.addEventListener('pointerleave', release);
+}
+bindTouchButton('btn-jump',
+  () => { keys['Space'] = true; },
+  () => { keys['Space'] = false; });
+bindTouchButton('btn-sprint',
+  () => { keys['ShiftLeft'] = true; },
+  () => { keys['ShiftLeft'] = false; });
+bindTouchButton('btn-shop',
+  () => { toggleShop(); });
+
 // ============================================================
 // STATE
 // ============================================================
@@ -604,20 +716,30 @@ function update(now){
   // ----- Input -----
   if (state.alive && !shopOpen){
     let mx = 0, mz = 0;
+    // Keyboard (digital ±1)
     if (keys['KeyW'] || keys['ArrowUp'])    mz -= 1;
     if (keys['KeyS'] || keys['ArrowDown'])  mz += 1;
     if (keys['KeyA'] || keys['ArrowLeft'])  mx -= 1;
     if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
+    let analog = false;
+    // Joystick (analog) — overrides keyboard if active
+    if (Math.abs(touchInput.jx) > 0.12 || Math.abs(touchInput.jy) > 0.12){
+      mx = touchInput.jx;
+      mz = touchInput.jy;
+      analog = true;
+    }
     const sprint = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.5 : 1.0;
     if (!state.inPit && (mx !== 0 || mz !== 0)){
-      const len = Math.hypot(mx, mz);
-      mx /= len; mz /= len;
+      if (!analog){
+        const len = Math.hypot(mx, mz);
+        mx /= len; mz /= len;
+      }
       const sp = state.speed * 60 * dt * sprint;
       player.position.x += mx * sp;
       player.position.z += mz * sp;
-      // Face direction based on Z input: forward (-z) = 0, backward (+z) = π
-      if (mz < 0) player.rotation.y = 0;
-      else if (mz > 0) player.rotation.y = Math.PI;
+      // Face direction based on Z input
+      if (mz < -0.1) player.rotation.y = 0;
+      else if (mz > 0.1) player.rotation.y = Math.PI;
     }
     // clamp
     player.position.x = Math.max(-RUNWAY_HALF_W + 0.6, Math.min(RUNWAY_HALF_W - 0.6, player.position.x));
@@ -778,7 +900,8 @@ function update(now){
   // ----- Player animation -----
   const moving = state.alive && !state.inPit && (
     keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||
-    keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']
+    keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']||
+    Math.abs(touchInput.jx) > 0.12 || Math.abs(touchInput.jy) > 0.12
   );
   if (moving){
     const swing = Math.sin(t * 14);
