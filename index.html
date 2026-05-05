@@ -442,6 +442,7 @@ function spawnTsunami(opts={}){
   const partial = wt.width < RUNWAY_HALF_W * 1.7;
   const startX = partial ? (Math.random() * 2 - 1) * (RUNWAY_HALF_W - wt.width/2 - 1) : 0;
   t.group.position.x = startX;
+  scene.add(t.group);                  // <-- the missing line
   tsunamis.push({
     obj: t,
     waveType: wt,
