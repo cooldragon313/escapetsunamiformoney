@@ -80,7 +80,7 @@
   <div class="row"><span class="label">最遠</span><span class="value" id="max-dist">0 m</span></div>
 </div>
 
-<div id="zone-tag">回基地後按 <kbd>B</kbd> 開商店</div>
+<div id="zone-tag"><span id="storm-indicator" style="display:none; color:#ff6644; font-weight:bold;">⚡ 暴風雨 ⚡ </span>回山頂按 <kbd>B</kbd> 開商店</div>
 
 <div id="warn">海 嘯 警 報</div>
 <div id="toast"></div>
@@ -102,10 +102,12 @@
   <kbd>W</kbd>/<kbd>↑</kbd> 前進 ·
   <kbd>S</kbd>/<kbd>↓</kbd> 後退 ·
   <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 左右 ·
-  <kbd>Space</kbd> 跳躍 / 離坑 ·
+  <kbd>Space</kbd> 跳躍 ·
   <kbd>Shift</kbd> 衝刺 ·
-  <kbd>B</kbd> 商店（基地內） ·
-  踩到坑會自動潛入 · 再按 <kbd>Space</kbd> 提早爬出
+  <kbd>B</kbd> 商店（山頂） ·
+  踩到坑會自動潛入 · 升「跳高」可縮短爬出時間 ·
+  <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
+  <span style="color:#5588ff">藍標準</span> · <span style="color:#ff5050">紅快</span> · <span style="color:#88aaff">寬</span> · <span style="color:#aa88ff">紫巨/黑災 必躲坑</span>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -114,10 +116,30 @@
 // CONFIG
 // ============================================================
 const RUNWAY_LEN     = 1000;
-const RUNWAY_HALF_W  = 10;
+const RUNWAY_HALF_W  = 20;          // 40 person-widths total
 const ZONE_LEN       = 200;
 const NUM_ZONES      = 5;
 const SAFETY_LINE_Z  = 5;
+
+// Wave catalog — colour × height × width × speed gives visual & tactical variety
+const WAVE_TYPES = [
+  { id:'green',  name:'矮浪',  color:0x44aa44, height:1.6, width:14, speedMul:1.0, weight:18, lethal:'jumpable',   storm:false },
+  { id:'blue',   name:'標準',  color:0x1565c0, height:6,   width:18, speedMul:1.0, weight:30, lethal:'normal',     storm:false },
+  { id:'red',    name:'快浪',  color:0xc62828, height:7,   width:14, speedMul:1.8, weight:18, lethal:'normal',     storm:false },
+  { id:'wide',   name:'寬浪',  color:0x1976d2, height:6,   width:32, speedMul:0.85,weight:14, lethal:'normal',     storm:false },
+  { id:'purple', name:'巨浪',  color:0x6a1b9a, height:14,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:8,  lethal:'fullscreen', storm:true },
+  { id:'titan',  name:'災難',  color:0x4a148c, height:22,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:3,  lethal:'fullscreen', storm:true },
+];
+function pickWaveType(stormBoost){
+  let total = 0;
+  for (const w of WAVE_TYPES) total += w.weight * (stormBoost && w.storm ? 3.5 : 1);
+  let r = Math.random() * total;
+  for (const w of WAVE_TYPES){
+    r -= w.weight * (stormBoost && w.storm ? 3.5 : 1);
+    if (r <= 0) return w;
+  }
+  return WAVE_TYPES[1];
+}
 const BASE_Z         = 14;
 const PLAYER_SPAWN_Z = 8;
 const HILL_START_Z   = 4;
@@ -199,19 +221,19 @@ ground.position.set(0, 0, -RUNWAY_LEN/2 + 5);
 scene.add(ground);
 
 [-1, 1].forEach(side => {
-  const grass = mkPlane(80, RUNWAY_LEN + 40, 0x3a7d3a);
-  grass.position.set(side * 50, -0.05, -RUNWAY_LEN/2 + 5);
+  const grass = mkPlane(100, RUNWAY_LEN + 40, 0x3a7d3a);
+  grass.position.set(side * 70, -0.05, -RUNWAY_LEN/2 + 5);
   scene.add(grass);
 });
 
-// Mountain chain along sides
+// Mountain chain along sides — push out beyond the wider runway
 for (let z = 10; z > -RUNWAY_LEN; z -= 26){
-  const hL = 7 + Math.random() * 7;
-  const hR = 7 + Math.random() * 7;
-  const ml = mk(18, hL, 24, 0x6B4423);
-  const mr = mk(18, hR, 24, 0x6B4423);
-  ml.position.set(-32 - Math.random() * 4, hL/2, z);
-  mr.position.set( 32 + Math.random() * 4, hR/2, z);
+  const hL = 8 + Math.random() * 8;
+  const hR = 8 + Math.random() * 8;
+  const ml = mk(22, hL, 24, 0x6B4423);
+  const mr = mk(22, hR, 24, 0x6B4423);
+  ml.position.set(-(RUNWAY_HALF_W + 22) - Math.random() * 4, hL/2, z);
+  mr.position.set( (RUNWAY_HALF_W + 22) + Math.random() * 4, hR/2, z);
   scene.add(ml); scene.add(mr);
 }
 
@@ -274,7 +296,7 @@ function spawnInitialCoins(){
   for (let zone = 0; zone < NUM_ZONES; zone++){
     const zStart = -(zone) * ZONE_LEN - 15;
     const zEnd   = -(zone + 1) * ZONE_LEN + 5;
-    const count  = 8 + zone * 6;
+    const count  = 14 + zone * 10;
     const value  = 1 + zone;
     for (let i = 0; i < count; i++){
       const c = new THREE.Mesh(coinGeo, coinMat);
@@ -301,13 +323,13 @@ function spawnPits(){
     const baseSpacing = 22 + zone * 16;
     const jitter = baseSpacing * 0.18;
     const spacing = baseSpacing + (Math.random() - 0.5) * 2 * jitter;
-    const x = (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 3);
-    const rim  = mkPlane(5.4, 4.4, 0x3a2a1a);
-    const hole = mkPlane(4.2, 3.4, 0x0a0604);
+    const x = (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 5);
+    const rim  = mkPlane(8, 6, 0x3a2a1a);
+    const hole = mkPlane(6.4, 4.6, 0x0a0604);
     rim.position.set(x, 0.03, z);
     hole.position.set(x, 0.04, z);
     scene.add(rim); scene.add(hole);
-    pits.push({ x, z, rx: 2.1, rz: 1.7 });
+    pits.push({ x, z, rx: 3.5, rz: 2.5 });
     z -= spacing;
   }
 }
@@ -331,40 +353,51 @@ scene.add(player);
 // ============================================================
 // TSUNAMI FACTORY
 // ============================================================
-function createTsunami(fullScreen){
+function createTsunami(waveType){
   const g = new THREE.Group();
-  const baseColor = fullScreen ? 0x0a3d8c : 0x1565c0;
-  const wallH = fullScreen ? 12 : 7;
-  const wall = mk(RUNWAY_HALF_W*2 + 12, wallH, 4, baseColor);
+  const wallH = waveType.height;
+  const wallW = waveType.width;
+  const wall = mk(wallW, wallH, 4, waveType.color);
   wall.position.y = wallH/2;
   g.add(wall);
-  const dark = mk(RUNWAY_HALF_W*2 + 12.1, 1.2, 4.1, 0x0d47a1);
-  dark.position.y = 0.6;
+  // dark base accent
+  const dark = mk(wallW + 0.1, Math.min(1.2, wallH * 0.4), 4.1, 0x0d2540);
+  dark.position.y = Math.min(0.6, wallH * 0.25);
   g.add(dark);
+  // foam line on top
   const foam = [];
-  for (let i = -RUNWAY_HALF_W - 5; i <= RUNWAY_HALF_W + 5; i += 1.4){
-    const f = mk(1.4, 1.0, 4.4, 0xffffff);
+  const foamStep = 1.4;
+  for (let i = -wallW/2; i <= wallW/2; i += foamStep){
+    const f = mk(foamStep, Math.min(1.0, wallH * 0.3), 4.4, 0xffffff);
     f.position.set(i, wallH + 0.4, 0);
     f.userData = { phase: i * 0.3 };
     g.add(f);
     foam.push(f);
   }
-  return { group:g, foam, wallH };
+  return { group:g, foam, wallH, wallW };
 }
 
 const tsunamis = [];
 function spawnTsunami(opts={}){
-  const t = createTsunami(opts.fullScreen);
+  const wt = opts.waveType ?? WAVE_TYPES[1];
+  const t = createTsunami(wt);
   t.group.position.z = opts.fromZ;
-  scene.add(t.group);
+  // partial-width waves get a starting x and lateral motion params
+  const partial = wt.width < RUNWAY_HALF_W * 1.7;
+  const startX = partial ? (Math.random() * 2 - 1) * (RUNWAY_HALF_W - wt.width/2 - 1) : 0;
+  t.group.position.x = startX;
   tsunamis.push({
     obj: t,
+    waveType: wt,
     speed: opts.speed,
-    fullScreen: !!opts.fullScreen,
     state: 'warning',
-    warnUntil: performance.now() + (opts.warnMs ?? 1500),
+    warnUntil: performance.now() + (opts.warnMs ?? 1200),
+    lateralAmp: partial ? Math.min(RUNWAY_HALF_W - wt.width/2 - 1, 4 + Math.random() * 6) : 0,
+    lateralPhase: Math.random() * Math.PI * 2,
+    lateralFreq: 0.5 + Math.random() * 1.0,
+    baseX: startX,
   });
-  showWarn(opts.fullScreen);
+  showWarn(wt);
 }
 
 // ============================================================
@@ -397,6 +430,11 @@ const state = {
   alive: true,
   maxDist: 0,
   spawnAccum: 0,
+  nextSpawnIn: 4,             // randomized wait until next wave
+  storm: false,                // storm phase active
+  stormUntil: 0,
+  stormCooldownUntil: 25,      // earliest time (in t-seconds) for first storm
+  stormBonusMultiplier: 1,
 };
 
 function applyStats(){
@@ -423,11 +461,13 @@ const hud = {
   shopMoney: document.getElementById('shop-money'),
   toast: document.getElementById('toast'),
   hilltopPrompt: document.getElementById('hilltop-prompt'),
+  stormIndicator: document.getElementById('storm-indicator'),
 };
 
 function updateHUD(){
   hud.money.textContent = state.money;
   hud.bag.textContent = `${state.bag} / ${state.carryMax}`;
+  hud.stormIndicator.style.display = state.storm ? 'inline' : 'none';
   const dist = Math.max(0, BASE_Z - player.position.z);
   hud.dist.textContent = `${Math.round(dist)} m`;
   if (dist > state.maxDist) state.maxDist = dist;
@@ -440,12 +480,18 @@ function updateHUD(){
 }
 
 let warnTimer = null;
-function showWarn(fullScreen){
-  hud.warn.textContent = fullScreen ? '全 屏 海 嘯 ！ 躲 進 坑 ！' : '海 嘯 警 報';
-  hud.warn.style.color = fullScreen ? '#ff8800' : '#ff3030';
+function showWarn(waveType){
+  let label, color;
+  if (waveType.lethal === 'fullscreen') { label = `${waveType.name}！必躲坑！`; color = '#ff8800'; }
+  else if (waveType.lethal === 'jumpable') { label = `${waveType.name}（可跳過）`; color = '#88ff66'; }
+  else if (waveType.id === 'red') { label = `${waveType.name}（速！）`; color = '#ff5050'; }
+  else if (waveType.id === 'wide') { label = `${waveType.name}（很寬）`; color = '#5588ff'; }
+  else { label = `${waveType.name}海嘯`; color = '#ff3030'; }
+  hud.warn.textContent = label;
+  hud.warn.style.color = color;
   hud.warn.classList.add('show');
   clearTimeout(warnTimer);
-  warnTimer = setTimeout(() => hud.warn.classList.remove('show'), 1700);
+  warnTimer = setTimeout(() => hud.warn.classList.remove('show'), 1500);
 }
 
 let toastTimer = null;
@@ -594,41 +640,41 @@ function update(now){
       const dz = (player.position.z - p.z) / p.rz;
       if (dx*dx + dz*dz < 1){
         state.inPit = p;
-        state.pitUntil = performance.now() + state.diveTimeStat * 1000;
+        // Pit stuck-time scales DOWN with jump upgrade; without upgrade you're trapped a long time.
+        const jumpLv = state.upgrades.jump;
+        const stuckTime = Math.max(2, 14 - jumpLv * 1.6);
+        state.pitUntil = performance.now() + stuckTime * 1000;
         player.position.y = -1.4;
-        toast(`進入避難坑 (${state.diveTimeStat.toFixed(0)} 秒)`);
+        toast(`進坑！跳出需 ${stuckTime.toFixed(0)} 秒（升跳高縮短）`);
         break;
       }
     }
   }
   if (state.inPit){
-    const timeUp = performance.now() > state.pitUntil;
-    const manualExit = keys['Space'];
-    if (timeUp || manualExit){
+    if (performance.now() > state.pitUntil){
       state.inPit = null;
       player.position.y = groundY(player.position.z);
-      keys['Space'] = false; // consume so we don't immediately jump
-      if (manualExit && !timeUp) toast('提早離開避難坑');
-      else toast('離開避難坑');
+      toast('爬出坑洞');
     }
+    // Space no longer triggers manual exit — must wait out the timer
   }
 
   // ----- Coin pickup -----
   if (state.alive){
+    const lootMul = state.storm ? 2 : 1;     // storm doubles bag value of fresh pickups
     for (const c of coins){
       if (c.collected) continue;
       const dx = player.position.x - c.x;
       const dz = player.position.z - c.z;
       if (dx*dx + dz*dz < state.pickupRadius * state.pickupRadius){
         if (c.dropped){
-          // recover dropped chest: full value, doesn't count toward bag size
           state.money += c.value;
           c.collected = true;
           scene.remove(c.mesh);
           toast(`找回寶藏 +$${c.value}`);
         } else if (state.bag < state.carryMax){
           state.bag += 1;
-          state.bagValue += c.value;
+          state.bagValue += c.value * lootMul;
           c.collected = true;
           scene.remove(c.mesh);
         }
@@ -655,20 +701,44 @@ function update(now){
     hud.hilltopPrompt.classList.remove('show');
   }
 
-  // ----- Tsunami spawning -----
-  state.spawnAccum += dt;
+  // ----- Storm system: occasional flurry with bonus loot -----
   const depthFactor = Math.min(1, state.maxDist / RUNWAY_LEN);
-  const interval = 4.5 - depthFactor * 2.0;  // 4.5s → 2.5s
-  if (state.alive && !shopOpen && state.spawnAccum > interval){
+  if (!state.storm && t > state.stormCooldownUntil && Math.random() < dt * 0.025){
+    state.storm = true;
+    state.stormUntil = t + 14 + Math.random() * 8;     // 14–22s storm
+    scene.background = new THREE.Color(0x4a3030);
+    scene.fog.color.setHex(0x4a3030);
+    toast('⚡ 暴風雨來臨！海浪頻繁、寶藏倍增 ⚡');
+  }
+  if (state.storm && t > state.stormUntil){
+    state.storm = false;
+    state.stormCooldownUntil = t + 30 + Math.random() * 50;  // 30–80s rest
+    scene.background = new THREE.Color(0x87ceeb);
+    scene.fog.color.setHex(0x87ceeb);
+    toast('海面恢復平靜');
+  }
+
+  // ----- Tsunami spawning (random interval, optional storm) -----
+  state.spawnAccum += dt;
+  if (state.alive && !shopOpen && state.spawnAccum > state.nextSpawnIn){
     state.spawnAccum = 0;
-    // Only spawn when player has crossed safety line into danger
+    // Random spacing: storm = burst, otherwise wide jitter
+    if (state.storm){
+      state.nextSpawnIn = 0.8 + Math.random() * 1.6;       // 0.8–2.4s in storm
+    } else {
+      // 60% normal cadence, 25% short gap, 15% long lull
+      const r = Math.random();
+      if (r < 0.6) state.nextSpawnIn = 3 + Math.random() * 3;        // 3–6s
+      else if (r < 0.85) state.nextSpawnIn = 1.5 + Math.random();    // 1.5–2.5s
+      else state.nextSpawnIn = 8 + Math.random() * 8;                // 8–16s lull
+    }
     if (player.position.z < SAFETY_LINE_Z){
-      const fullScreen = Math.random() < (0.20 + depthFactor * 0.30);
+      const wt = pickWaveType(state.storm);
       const fromZ = -RUNWAY_LEN + 5;
       const dist = player.position.z - fromZ;
-      const approach = WAVE_APPROACH_SEC - depthFactor * 4;  // 10s shallow → 6s deep
-      const speed = Math.max(WAVE_MIN_SPEED, dist / approach / 60);
-      spawnTsunami({ fromZ, speed, fullScreen });
+      const approach = (WAVE_APPROACH_SEC - depthFactor * 4) / wt.speedMul;
+      const speed = Math.max(WAVE_MIN_SPEED * wt.speedMul, dist / approach / 60);
+      spawnTsunami({ fromZ, speed, waveType: wt });
     }
   }
 
@@ -676,16 +746,26 @@ function update(now){
   for (let i = tsunamis.length - 1; i >= 0; i--){
     const ts = tsunamis[i];
     ts.obj.group.position.z += ts.speed * 60 * dt;
+    // Lateral drift for partial-width waves
+    if (ts.lateralAmp > 0){
+      ts.obj.group.position.x = ts.baseX + Math.sin(t * ts.lateralFreq + ts.lateralPhase) * ts.lateralAmp;
+    }
     if (ts.state === 'warning' && performance.now() > ts.warnUntil) ts.state = 'advancing';
     // foam undulation
     ts.obj.foam.forEach(f => {
       f.position.y = ts.obj.wallH + 0.4 + Math.sin(t * 4 + f.userData.phase) * 0.3;
     });
-    // collision with player (only in danger zone, never on the safety hill)
+    // collision: must be inside both z-band AND x-band; jumpable waves can be cleared by jumping above height
     if (state.alive && player.position.z < SAFETY_LINE_Z && !state.inPit){
       const dz = player.position.z - ts.obj.group.position.z;
-      if (Math.abs(dz) < 2.4){
-        killPlayer();
+      const dx = player.position.x - ts.obj.group.position.x;
+      const halfW = ts.obj.wallW / 2;
+      if (Math.abs(dz) < 2.4 && Math.abs(dx) < halfW){
+        if (ts.waveType.lethal === 'jumpable' && player.position.y > ts.waveType.height + 0.3){
+          // safely vaulted over the low wave
+        } else {
+          killPlayer();
+        }
       }
     }
     // remove past safety line
