@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>Escape Tsunami — 3D 方塊版 MVP</title>
+<style>
+  body { margin:0; background:#000; color:#eee; font-family: monospace; overflow:hidden; }
+  #stage { position: fixed; inset: 0; }
+  #hud { position: fixed; top: 12px; left: 12px; padding: 10px 14px;
+         background: rgba(0,0,0,0.55); border: 2px solid #444; font-size: 14px;
+         line-height: 1.7; pointer-events: none; min-width: 220px; }
+  #hud .row { display:flex; justify-content:space-between; gap:14px; }
+  #hud .label { color:#888; }
+  #hud .value { color:#fff; font-weight: bold; }
+  #hud .gold  { color: #ffd700; }
+  #zone-tag { position: fixed; top: 12px; right: 12px; padding: 8px 14px;
+              background: rgba(0,0,0,0.55); border: 2px solid #444; font-size: 14px; }
+  #warn { position: fixed; top: 26%; left: 50%; transform: translate(-50%, -50%);
+          font-size: 56px; font-weight: bold; color: #ff3030;
+          text-shadow: 0 0 24px #ff0000, 0 0 4px #000;
+          opacity: 0; pointer-events: none;
+          letter-spacing: 6px; }
+  #warn.show { opacity: 1; animation: pulse 0.45s infinite; }
+  @keyframes pulse {
+    0%,100%{transform:translate(-50%,-50%) scale(1)}
+    50%{transform:translate(-50%,-50%) scale(1.12)}
+  }
+  #death { position: fixed; inset:0; background: rgba(120,0,0,0.65);
+           display:none; align-items:center; justify-content:center; flex-direction:column;
+           font-size: 44px; color: #fff; text-shadow: 0 0 12px #000; }
+  #death.show { display:flex; }
+  #death .sub { font-size: 16px; margin-top: 14px; color: #fcc; }
+  #shop { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+          background: rgba(20,20,30,0.96); border: 3px solid #888;
+          padding: 22px 28px; min-width: 460px; display:none; box-shadow: 0 0 32px #000; }
+  #shop.show { display:block; }
+  #shop h3 { margin: 0 0 14px; text-align:center; color:#ffd700; font-size: 20px; letter-spacing: 4px; }
+  #shop .money-bar { text-align:center; color:#ffd700; margin-bottom: 14px; font-size: 14px; }
+  .upgrade { display: flex; align-items:center; gap: 12px;
+             padding: 10px 4px; border-bottom: 1px dashed #444; }
+  .upgrade:last-child { border-bottom: none; }
+  .upgrade .name { width: 80px; }
+  .upgrade .lv   { color:#88f; width: 48px; text-align:center; font-size: 12px; }
+  .upgrade .stat { flex:1; color:#aaa; font-size: 12px; }
+  .upgrade button { background:#2a4a8a; color:#fff; border:1px solid #88f;
+                    padding:6px 12px; cursor:pointer; font-family:inherit; min-width: 90px; }
+  .upgrade button:hover:not(:disabled) { background:#3a5a9a; }
+  .upgrade button:disabled { background:#333; color:#666; cursor:not-allowed; border-color:#555; }
+  #shop .hint { margin-top: 12px; font-size: 12px; color:#888; text-align:center; }
+  #help { position: fixed; bottom: 12px; left: 12px; padding: 8px 12px;
+          background: rgba(0,0,0,0.55); border: 1px solid #444; font-size: 12px;
+          color:#aaa; line-height: 1.7; max-width: 720px; }
+  kbd { background:#333; padding: 1px 6px; border-radius:3px; color:#fff;
+        border:1px solid #555; font-family: inherit; font-size: 11px; }
+  #toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+           background: rgba(0,0,0,0.7); color:#fff; padding: 6px 16px;
+           border:1px solid #555; opacity:0; transition: opacity 0.3s; font-size: 13px; pointer-events:none; }
+  #toast.show { opacity:1; }
+  #hilltop-prompt { position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%);
+                    background: rgba(40,30,0,0.85); color: #ffd700; padding: 10px 22px;
+                    border: 2px solid #ffd700; font-size: 16px; font-weight: bold;
+                    display: none; pointer-events: none; box-shadow: 0 0 16px rgba(255,215,0,0.4); }
+  #hilltop-prompt.show { display: block; }
+  #hud .value.flash { animation: moneyFlash 0.7s ease-out; }
+  @keyframes moneyFlash {
+    0%   { transform: scale(1); color: #ffd700; }
+    25%  { transform: scale(1.6); color: #fff; text-shadow: 0 0 16px #ffd700, 0 0 4px #fff; }
+    100% { transform: scale(1); color: #ffd700; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<div id="hud">
+  <div class="row"><span class="label">$ 存款</span><span class="value gold" id="money">0</span></div>
+  <div class="row"><span class="label">攜帶</span><span class="value" id="bag">0 / 10</span></div>
+  <div class="row"><span class="label">區域</span><span class="value" id="zone">基地</span></div>
+  <div class="row"><span class="label">距離</span><span class="value" id="dist">0 m</span></div>
+  <div class="row"><span class="label">最遠</span><span class="value" id="max-dist">0 m</span></div>
+</div>
+
+<div id="zone-tag">回基地後按 <kbd>B</kbd> 開商店</div>
+
+<div id="warn">海 嘯 警 報</div>
+<div id="toast"></div>
+<div id="hilltop-prompt"></div>
+
+<div id="death">
+  <div>你 被 海 嘯 吞 噬</div>
+  <div class="sub">寶藏掉落於死亡處 · 重生中…</div>
+</div>
+
+<div id="shop">
+  <h3>★ 強 化 商 店 ★</h3>
+  <div class="money-bar">持有金錢：$<span id="shop-money">0</span></div>
+  <div id="shop-list"></div>
+  <div class="hint">按 <kbd>B</kbd> 或 <kbd>Esc</kbd> 關閉</div>
+</div>
+
+<div id="help">
+  <kbd>W</kbd>/<kbd>↑</kbd> 前進 ·
+  <kbd>S</kbd>/<kbd>↓</kbd> 後退 ·
+  <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 左右 ·
+  <kbd>Space</kbd> 跳躍 / 離坑 ·
+  <kbd>Shift</kbd> 衝刺 ·
+  <kbd>B</kbd> 商店（基地內） ·
+  踩到坑會自動潛入 · 再按 <kbd>Space</kbd> 提早爬出
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const RUNWAY_LEN     = 1000;
+const RUNWAY_HALF_W  = 10;
+const ZONE_LEN       = 200;
+const NUM_ZONES      = 5;
+const SAFETY_LINE_Z  = 5;
+const BASE_Z         = 14;
+const PLAYER_SPAWN_Z = 8;
+const HILL_START_Z   = 4;
+const HILL_END_Z     = 18;
+const HILL_PEAK      = 4.0;
+const HILL_LEN       = HILL_END_Z - HILL_START_Z;
+const HILL_STEPS     = 7;
+const HILL_STEP_LEN  = HILL_LEN / HILL_STEPS;
+const HILL_STEP_RISE = HILL_PEAK / HILL_STEPS;
+const BASE_TOP_Z     = HILL_END_Z - HILL_STEP_LEN;  // top step boundary; deposit/shop here
+const TSUNAMI_STOP_Z = HILL_START_Z;
+const WAVE_APPROACH_SEC = 10;
+const WAVE_MIN_SPEED = 0.30;
+
+function groundY(z){
+  if (z <= HILL_START_Z) return 0;
+  if (z >= HILL_END_Z) return HILL_PEAK;
+  const stepIdx = Math.floor((z - HILL_START_Z) / HILL_STEP_LEN);
+  return (stepIdx + 1) * HILL_STEP_RISE;
+}
+
+const STATS_BASE = {
+  speed: 0.18,
+  jump: 0.42,
+  diveTime: 4.0,
+  pickupRadius: 1.3,
+  carryMax: 10,
+};
+const UPGRADE_DEF = [
+  { key:'speed',         name:'跑速',     unit:'/格',  step:0.04, baseCost: 30 },
+  { key:'jump',          name:'跳高',     unit:'',     step:0.08, baseCost: 25 },
+  { key:'diveTime',      name:'潛水時間', unit:'秒',   step:1.0,  baseCost: 35 },
+  { key:'pickupRadius',  name:'撿取範圍', unit:'格',   step:0.4,  baseCost: 25 },
+  { key:'carryMax',      name:'負重',     unit:'個',   step:5,    baseCost: 40 },
+];
+
+// ============================================================
+// THREE SETUP
+// ============================================================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 250, 1300);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1500);
+camera.position.set(0, 6, BASE_Z + 2);
+camera.lookAt(0, 1, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(1);
+document.getElementById('stage').appendChild(renderer.domElement);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+dirLight.position.set(20, 30, 10);
+scene.add(dirLight);
+
+// ============================================================
+// HELPERS
+// ============================================================
+const mk = (w,h,d,c) => new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshLambertMaterial({color:c}));
+const mkPlane = (w,h,c) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), new THREE.MeshBasicMaterial({color:c}));
+  m.rotation.x = -Math.PI/2;
+  return m;
+};
+
+// ============================================================
+// WORLD: ground, grass, mountains
+// ============================================================
+const ground = mkPlane(RUNWAY_HALF_W*2, RUNWAY_LEN + 40, 0xc9a96a);
+ground.position.set(0, 0, -RUNWAY_LEN/2 + 5);
+scene.add(ground);
+
+[-1, 1].forEach(side => {
+  const grass = mkPlane(80, RUNWAY_LEN + 40, 0x3a7d3a);
+  grass.position.set(side * 50, -0.05, -RUNWAY_LEN/2 + 5);
+  scene.add(grass);
+});
+
+// Mountain chain along sides
+for (let z = 10; z > -RUNWAY_LEN; z -= 26){
+  const hL = 7 + Math.random() * 7;
+  const hR = 7 + Math.random() * 7;
+  const ml = mk(18, hL, 24, 0x6B4423);
+  const mr = mk(18, hR, 24, 0x6B4423);
+  ml.position.set(-32 - Math.random() * 4, hL/2, z);
+  mr.position.set( 32 + Math.random() * 4, hR/2, z);
+  scene.add(ml); scene.add(mr);
+}
+
+// Difficulty zone stripes (colored bands across runway)
+const zoneColors = [0x44aa44, 0x88aa44, 0xaa8844, 0xaa4444, 0x6644aa];
+for (let i = 0; i < NUM_ZONES; i++){
+  const stripe = mkPlane(RUNWAY_HALF_W*2, 1.4, zoneColors[i]);
+  stripe.position.set(0, 0.04, -(i + 1) * ZONE_LEN);
+  scene.add(stripe);
+}
+
+// Speed-feel grid lines
+for (let z = 0; z > -RUNWAY_LEN; z -= 8){
+  const line = mkPlane(0.4, 1.6, 0xa8884a);
+  line.position.set(0, 0.03, z);
+  scene.add(line);
+}
+
+// Safety line (red, in front of base)
+const safetyLine = mkPlane(RUNWAY_HALF_W*2, 0.6, 0xff3333);
+safetyLine.position.set(0, 0.05, SAFETY_LINE_Z);
+scene.add(safetyLine);
+
+// Hill behind safety line — stepped voxel hill rising to base
+for (let i = 0; i < HILL_STEPS; i++){
+  const zCenter = HILL_START_Z + (i + 0.5) * HILL_STEP_LEN;
+  const h = (i + 1) * HILL_STEP_RISE;
+  const tone = i % 2 === 0 ? 0xc9a96a : 0xb89858;
+  const step = mk(RUNWAY_HALF_W*2, h, HILL_STEP_LEN, tone);
+  step.position.set(0, h/2, zCenter);
+  scene.add(step);
+}
+// Markers at hill peak (placed solidly on top step, z=17)
+const PEAK_Z = HILL_END_Z - HILL_STEP_LEN/2;  // 17
+const pole = mk(0.2, 3, 0.2, 0x3a2a1a);
+pole.position.set(-RUNWAY_HALF_W + 1, HILL_PEAK + 1.5, PEAK_Z);
+scene.add(pole);
+const flag = mk(2, 1.2, 0.1, 0xaa4040);
+flag.position.set(-RUNWAY_HALF_W + 2.2, HILL_PEAK + 2.5, PEAK_Z);
+scene.add(flag);
+const shopPole = mk(0.15, 2.4, 0.15, 0x3a2a1a);
+shopPole.position.set(RUNWAY_HALF_W - 1.5, HILL_PEAK + 1.2, PEAK_Z);
+scene.add(shopPole);
+const shopSign = mk(1.6, 0.9, 0.1, 0xffd700);
+shopSign.position.set(RUNWAY_HALF_W - 1.5, HILL_PEAK + 2.6, PEAK_Z);
+scene.add(shopSign);
+// "BASE" deposit beacon — pulsing column on top step so player knows where to deposit
+const beacon = mk(0.4, 0.3, 0.4, 0xffdd00);
+beacon.position.set(0, HILL_PEAK + 0.2, PEAK_Z);
+scene.add(beacon);
+
+// ============================================================
+// COINS
+// ============================================================
+const coinGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+const coinMat = new THREE.MeshLambertMaterial({ color: 0xffd700 });
+const coins = [];
+
+function spawnInitialCoins(){
+  for (let zone = 0; zone < NUM_ZONES; zone++){
+    const zStart = -(zone) * ZONE_LEN - 15;
+    const zEnd   = -(zone + 1) * ZONE_LEN + 5;
+    const count  = 8 + zone * 6;
+    const value  = 1 + zone;
+    for (let i = 0; i < count; i++){
+      const c = new THREE.Mesh(coinGeo, coinMat);
+      const x = (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 1);
+      const z = zStart - Math.random() * (zStart - zEnd);
+      c.position.set(x, 0.7, z);
+      scene.add(c);
+      coins.push({ mesh:c, x, z, value, collected:false, dropped:false });
+    }
+  }
+}
+spawnInitialCoins();
+
+// ============================================================
+// PITS
+// ============================================================
+const pits = [];
+function spawnPits(){
+  let z = -22;
+  while (z > -RUNWAY_LEN + 20){
+    const dist = -z;
+    const zone = Math.min(NUM_ZONES - 1, Math.floor(dist / ZONE_LEN));
+    // Per-zone average spacing: 22, 38, 54, 70, 86 m
+    const baseSpacing = 22 + zone * 16;
+    const jitter = baseSpacing * 0.18;
+    const spacing = baseSpacing + (Math.random() - 0.5) * 2 * jitter;
+    const x = (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 3);
+    const rim  = mkPlane(5.4, 4.4, 0x3a2a1a);
+    const hole = mkPlane(4.2, 3.4, 0x0a0604);
+    rim.position.set(x, 0.03, z);
+    hole.position.set(x, 0.04, z);
+    scene.add(rim); scene.add(hole);
+    pits.push({ x, z, rx: 2.1, rz: 1.7 });
+    z -= spacing;
+  }
+}
+spawnPits();
+
+// ============================================================
+// PLAYER
+// ============================================================
+const player = new THREE.Group();
+const torso = mk(1.2, 1.3, 0.7, 0xd04040); torso.position.y = 1.55; player.add(torso);
+const head  = mk(0.9, 0.9, 0.9, 0xf0c090); head.position.y = 2.65;  player.add(head);
+const hair  = mk(0.92, 0.35, 0.92, 0x3a2a1a); hair.position.y = 2.95; player.add(hair);
+const legL  = mk(0.45, 1, 0.55, 0x1a1a4a); legL.position.set(-0.32, 0.5, 0); player.add(legL);
+const legR  = mk(0.45, 1, 0.55, 0x1a1a4a); legR.position.set( 0.32, 0.5, 0); player.add(legR);
+const armL  = mk(0.35, 1.0, 0.4, 0xf0c090); armL.position.set(-0.78, 1.6, 0); player.add(armL);
+const armR  = mk(0.35, 1.0, 0.4, 0xf0c090); armR.position.set( 0.78, 1.6, 0); player.add(armR);
+const pack  = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); player.add(pack);
+player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
+scene.add(player);
+
+// ============================================================
+// TSUNAMI FACTORY
+// ============================================================
+function createTsunami(fullScreen){
+  const g = new THREE.Group();
+  const baseColor = fullScreen ? 0x0a3d8c : 0x1565c0;
+  const wallH = fullScreen ? 12 : 7;
+  const wall = mk(RUNWAY_HALF_W*2 + 12, wallH, 4, baseColor);
+  wall.position.y = wallH/2;
+  g.add(wall);
+  const dark = mk(RUNWAY_HALF_W*2 + 12.1, 1.2, 4.1, 0x0d47a1);
+  dark.position.y = 0.6;
+  g.add(dark);
+  const foam = [];
+  for (let i = -RUNWAY_HALF_W - 5; i <= RUNWAY_HALF_W + 5; i += 1.4){
+    const f = mk(1.4, 1.0, 4.4, 0xffffff);
+    f.position.set(i, wallH + 0.4, 0);
+    f.userData = { phase: i * 0.3 };
+    g.add(f);
+    foam.push(f);
+  }
+  return { group:g, foam, wallH };
+}
+
+const tsunamis = [];
+function spawnTsunami(opts={}){
+  const t = createTsunami(opts.fullScreen);
+  t.group.position.z = opts.fromZ;
+  scene.add(t.group);
+  tsunamis.push({
+    obj: t,
+    speed: opts.speed,
+    fullScreen: !!opts.fullScreen,
+    state: 'warning',
+    warnUntil: performance.now() + (opts.warnMs ?? 1500),
+  });
+  showWarn(opts.fullScreen);
+}
+
+// ============================================================
+// INPUT
+// ============================================================
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'KeyB') toggleShop();
+  if (e.code === 'Escape' && shopOpen) toggleShop();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  money: 0,
+  bag: 0,
+  bagValue: 0,
+  vy: 0,
+  inPit: null,
+  pitUntil: 0,
+  speed: STATS_BASE.speed,
+  jump: STATS_BASE.jump,
+  diveTimeStat: STATS_BASE.diveTime,
+  pickupRadius: STATS_BASE.pickupRadius,
+  carryMax: STATS_BASE.carryMax,
+  upgrades: { speed:0, jump:0, diveTime:0, pickupRadius:0, carryMax:0 },
+  alive: true,
+  maxDist: 0,
+  spawnAccum: 0,
+};
+
+function applyStats(){
+  state.speed         = STATS_BASE.speed         + UPGRADE_DEF[0].step * state.upgrades.speed;
+  state.jump          = STATS_BASE.jump          + UPGRADE_DEF[1].step * state.upgrades.jump;
+  state.diveTimeStat  = STATS_BASE.diveTime      + UPGRADE_DEF[2].step * state.upgrades.diveTime;
+  state.pickupRadius  = STATS_BASE.pickupRadius  + UPGRADE_DEF[3].step * state.upgrades.pickupRadius;
+  state.carryMax      = STATS_BASE.carryMax      + UPGRADE_DEF[4].step * state.upgrades.carryMax;
+}
+
+// ============================================================
+// HUD
+// ============================================================
+const hud = {
+  money: document.getElementById('money'),
+  bag: document.getElementById('bag'),
+  zone: document.getElementById('zone'),
+  dist: document.getElementById('dist'),
+  maxDist: document.getElementById('max-dist'),
+  warn: document.getElementById('warn'),
+  death: document.getElementById('death'),
+  shop: document.getElementById('shop'),
+  shopList: document.getElementById('shop-list'),
+  shopMoney: document.getElementById('shop-money'),
+  toast: document.getElementById('toast'),
+  hilltopPrompt: document.getElementById('hilltop-prompt'),
+};
+
+function updateHUD(){
+  hud.money.textContent = state.money;
+  hud.bag.textContent = `${state.bag} / ${state.carryMax}`;
+  const dist = Math.max(0, BASE_Z - player.position.z);
+  hud.dist.textContent = `${Math.round(dist)} m`;
+  if (dist > state.maxDist) state.maxDist = dist;
+  hud.maxDist.textContent = `${Math.round(state.maxDist)} m`;
+  if (player.position.z > SAFETY_LINE_Z) hud.zone.textContent = '基地';
+  else {
+    const zone = Math.min(NUM_ZONES, Math.floor(dist / ZONE_LEN) + 1);
+    hud.zone.textContent = `第 ${zone} 區`;
+  }
+}
+
+let warnTimer = null;
+function showWarn(fullScreen){
+  hud.warn.textContent = fullScreen ? '全 屏 海 嘯 ！ 躲 進 坑 ！' : '海 嘯 警 報';
+  hud.warn.style.color = fullScreen ? '#ff8800' : '#ff3030';
+  hud.warn.classList.add('show');
+  clearTimeout(warnTimer);
+  warnTimer = setTimeout(() => hud.warn.classList.remove('show'), 1700);
+}
+
+let toastTimer = null;
+function toast(text){
+  hud.toast.textContent = text;
+  hud.toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => hud.toast.classList.remove('show'), 1600);
+}
+
+// ============================================================
+// SHOP
+// ============================================================
+let shopOpen = false;
+function inBase(){
+  return player.position.z >= BASE_TOP_Z;  // top step only
+}
+function upgradeCost(def, lv){
+  return Math.round(def.baseCost * Math.pow(1.6, lv));
+}
+function renderShop(){
+  hud.shopMoney.textContent = state.money;
+  hud.shopList.innerHTML = '';
+  UPGRADE_DEF.forEach(def => {
+    const lv = state.upgrades[def.key];
+    const cost = upgradeCost(def, lv);
+    const cur = STATS_BASE[def.key] + def.step * lv;
+    const next = STATS_BASE[def.key] + def.step * (lv + 1);
+    const fmt = (v) => Number.isInteger(v) ? v : (+v).toFixed(2);
+    const row = document.createElement('div');
+    row.className = 'upgrade';
+    row.innerHTML = `
+      <span class="name">${def.name}</span>
+      <span class="lv">Lv.${lv}</span>
+      <span class="stat">${fmt(cur)} → ${fmt(next)} ${def.unit}</span>
+      <button data-key="${def.key}" ${state.money < cost ? 'disabled' : ''}>升級 $${cost}</button>
+    `;
+    hud.shopList.appendChild(row);
+  });
+  hud.shopList.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const def = UPGRADE_DEF.find(d => d.key === btn.dataset.key);
+      const cost = upgradeCost(def, state.upgrades[def.key]);
+      if (state.money >= cost){
+        state.money -= cost;
+        state.upgrades[def.key]++;
+        applyStats();
+        renderShop();
+        updateHUD();
+      }
+    });
+  });
+}
+function toggleShop(){
+  if (!shopOpen && !inBase()){
+    toast('要爬到山頂（金色光柱）才能開商店');
+    return;
+  }
+  if (!state.alive) return;
+  shopOpen = !shopOpen;
+  hud.shop.classList.toggle('show', shopOpen);
+  if (shopOpen) renderShop();
+}
+
+// ============================================================
+// DEATH / RESPAWN
+// ============================================================
+let deathTimer = null;
+function killPlayer(){
+  if (!state.alive) return;
+  state.alive = false;
+  // Drop bag as recoverable golden chest at death position
+  if (state.bag > 0){
+    const drop = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0, 1.0, 1.0),
+      new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0x331100 })
+    );
+    drop.position.set(player.position.x, 0.5, player.position.z);
+    scene.add(drop);
+    coins.push({
+      mesh: drop, x: drop.position.x, z: drop.position.z,
+      value: state.bagValue, collected: false, dropped: true
+    });
+    state.bag = 0;
+    state.bagValue = 0;
+  }
+  hud.death.classList.add('show');
+  clearTimeout(deathTimer);
+  deathTimer = setTimeout(() => {
+    player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
+    state.vy = 0;
+    state.inPit = null;
+    state.alive = true;
+    hud.death.classList.remove('show');
+    updateHUD();
+  }, 1500);
+}
+
+// ============================================================
+// MAIN LOOP
+// ============================================================
+let t = 0;
+let lastTime = performance.now();
+
+function update(now){
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
+  t += dt;
+
+  // ----- Input -----
+  if (state.alive && !shopOpen){
+    let mx = 0, mz = 0;
+    if (keys['KeyW'] || keys['ArrowUp'])    mz -= 1;
+    if (keys['KeyS'] || keys['ArrowDown'])  mz += 1;
+    if (keys['KeyA'] || keys['ArrowLeft'])  mx -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) mx += 1;
+    const sprint = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.5 : 1.0;
+    if (!state.inPit && (mx !== 0 || mz !== 0)){
+      const len = Math.hypot(mx, mz);
+      mx /= len; mz /= len;
+      const sp = state.speed * 60 * dt * sprint;
+      player.position.x += mx * sp;
+      player.position.z += mz * sp;
+      // Face direction based on Z input: forward (-z) = 0, backward (+z) = π
+      if (mz < 0) player.rotation.y = 0;
+      else if (mz > 0) player.rotation.y = Math.PI;
+    }
+    // clamp
+    player.position.x = Math.max(-RUNWAY_HALF_W + 0.6, Math.min(RUNWAY_HALF_W - 0.6, player.position.x));
+    player.position.z = Math.min(HILL_END_Z, Math.max(-RUNWAY_LEN + 5, player.position.z));
+
+    // jump
+    const floor = groundY(player.position.z);
+    if (keys['Space'] && Math.abs(player.position.y - floor) < 0.05 && !state.inPit){
+      state.vy = state.jump;
+    }
+    state.vy -= 0.025;
+    player.position.y += state.vy * 60 * dt;
+    if (player.position.y < floor){ player.position.y = floor; state.vy = 0; }
+  }
+
+  // ----- Pit auto-enter -----
+  if (state.alive && !state.inPit && player.position.y < 0.5){
+    for (const p of pits){
+      const dx = (player.position.x - p.x) / p.rx;
+      const dz = (player.position.z - p.z) / p.rz;
+      if (dx*dx + dz*dz < 1){
+        state.inPit = p;
+        state.pitUntil = performance.now() + state.diveTimeStat * 1000;
+        player.position.y = -1.4;
+        toast(`進入避難坑 (${state.diveTimeStat.toFixed(0)} 秒)`);
+        break;
+      }
+    }
+  }
+  if (state.inPit){
+    const timeUp = performance.now() > state.pitUntil;
+    const manualExit = keys['Space'];
+    if (timeUp || manualExit){
+      state.inPit = null;
+      player.position.y = groundY(player.position.z);
+      keys['Space'] = false; // consume so we don't immediately jump
+      if (manualExit && !timeUp) toast('提早離開避難坑');
+      else toast('離開避難坑');
+    }
+  }
+
+  // ----- Coin pickup -----
+  if (state.alive){
+    for (const c of coins){
+      if (c.collected) continue;
+      const dx = player.position.x - c.x;
+      const dz = player.position.z - c.z;
+      if (dx*dx + dz*dz < state.pickupRadius * state.pickupRadius){
+        if (c.dropped){
+          // recover dropped chest: full value, doesn't count toward bag size
+          state.money += c.value;
+          c.collected = true;
+          scene.remove(c.mesh);
+          toast(`找回寶藏 +$${c.value}`);
+        } else if (state.bag < state.carryMax){
+          state.bag += 1;
+          state.bagValue += c.value;
+          c.collected = true;
+          scene.remove(c.mesh);
+        }
+      }
+    }
+  }
+
+  // ----- Auto-deposit when at hilltop -----
+  if (state.alive && inBase() && state.bag > 0){
+    state.money += state.bagValue;
+    toast(`存入 +$${state.bagValue}`);
+    hud.money.classList.remove('flash');
+    void hud.money.offsetWidth;        // restart CSS animation
+    hud.money.classList.add('flash');
+    state.bag = 0;
+    state.bagValue = 0;
+  }
+
+  // ----- Hilltop spend prompt -----
+  if (state.alive && inBase() && state.money > 0 && !shopOpen){
+    hud.hilltopPrompt.textContent = `按 B 開商店消費 ($${state.money})`;
+    hud.hilltopPrompt.classList.add('show');
+  } else {
+    hud.hilltopPrompt.classList.remove('show');
+  }
+
+  // ----- Tsunami spawning -----
+  state.spawnAccum += dt;
+  const depthFactor = Math.min(1, state.maxDist / RUNWAY_LEN);
+  const interval = 4.5 - depthFactor * 2.0;  // 4.5s → 2.5s
+  if (state.alive && !shopOpen && state.spawnAccum > interval){
+    state.spawnAccum = 0;
+    // Only spawn when player has crossed safety line into danger
+    if (player.position.z < SAFETY_LINE_Z){
+      const fullScreen = Math.random() < (0.20 + depthFactor * 0.30);
+      const fromZ = -RUNWAY_LEN + 5;
+      const dist = player.position.z - fromZ;
+      const approach = WAVE_APPROACH_SEC - depthFactor * 4;  // 10s shallow → 6s deep
+      const speed = Math.max(WAVE_MIN_SPEED, dist / approach / 60);
+      spawnTsunami({ fromZ, speed, fullScreen });
+    }
+  }
+
+  // ----- Tsunami updates -----
+  for (let i = tsunamis.length - 1; i >= 0; i--){
+    const ts = tsunamis[i];
+    ts.obj.group.position.z += ts.speed * 60 * dt;
+    if (ts.state === 'warning' && performance.now() > ts.warnUntil) ts.state = 'advancing';
+    // foam undulation
+    ts.obj.foam.forEach(f => {
+      f.position.y = ts.obj.wallH + 0.4 + Math.sin(t * 4 + f.userData.phase) * 0.3;
+    });
+    // collision with player (only in danger zone, never on the safety hill)
+    if (state.alive && player.position.z < SAFETY_LINE_Z && !state.inPit){
+      const dz = player.position.z - ts.obj.group.position.z;
+      if (Math.abs(dz) < 2.4){
+        killPlayer();
+      }
+    }
+    // remove past safety line
+    if (ts.obj.group.position.z > TSUNAMI_STOP_Z){
+      scene.remove(ts.obj.group);
+      tsunamis.splice(i, 1);
+    }
+  }
+
+  // ----- Player animation -----
+  const moving = state.alive && !state.inPit && (
+    keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||
+    keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']
+  );
+  if (moving){
+    const swing = Math.sin(t * 14);
+    legL.rotation.x =  swing * 0.6;
+    legR.rotation.x = -swing * 0.6;
+    armL.rotation.x = -swing * 0.4;
+    armR.rotation.x =  swing * 0.4;
+  } else {
+    legL.rotation.x *= 0.85;
+    legR.rotation.x *= 0.85;
+    armL.rotation.x *= 0.85;
+    armR.rotation.x *= 0.85;
+  }
+
+  // ----- Deposit beacon (slow rotate + gentle pulse) -----
+  beacon.rotation.y += dt * 1.5;
+  const pulse = 1 + Math.sin(t * 2) * 0.15;
+  beacon.scale.set(pulse, pulse, pulse);
+
+  // ----- Coin animation -----
+  for (const c of coins){
+    if (c.collected) continue;
+    if (c.dropped){
+      c.mesh.rotation.y += dt * 2.5;
+      c.mesh.position.y = 0.5 + Math.sin(t * 4) * 0.15;
+    } else {
+      c.mesh.rotation.y = t * 2 + c.x * 0.3;
+      c.mesh.position.y = 0.7 + Math.sin(t * 3 + c.x) * 0.12;
+    }
+  }
+
+  // ----- Camera follow (third-person, behind & above) -----
+  const camTargetX = player.position.x * 0.5;
+  const camTargetY = player.position.y + 5;
+  const camTargetZ = player.position.z + 8;
+  camera.position.x += (camTargetX - camera.position.x) * 0.1;
+  camera.position.y += (camTargetY - camera.position.y) * 0.1;
+  camera.position.z += (camTargetZ - camera.position.z) * 0.1;
+  camera.lookAt(player.position.x, player.position.y + 1.5, player.position.z - 5);
+
+  updateHUD();
+  renderer.render(scene, camera);
+  requestAnimationFrame(update);
+}
+
+applyStats();
+updateHUD();
+requestAnimationFrame(update);
+</script>
+</body>
+</html>

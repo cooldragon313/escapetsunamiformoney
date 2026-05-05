@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>方案2 - 真3D 方塊風</title>
+<style>
+  body { margin:0; background:#1a1a1a; color:#eee; font-family: monospace;
+         display:flex; flex-direction:column; align-items:center; padding:20px; min-height:100vh; box-sizing:border-box; }
+  h2 { margin: 8px 0; }
+  p { color: #aaa; font-size: 13px; max-width: 680px; text-align:center; line-height:1.6; }
+  #stage { border:2px solid #444; }
+  .legend { margin-top: 12px; font-size: 12px; color: #999; text-align:left; max-width: 680px; }
+  .legend span { display:inline-block; width:14px; height:14px; vertical-align:middle; margin-right:4px; border:1px solid #555; }
+</style>
+</head>
+<body>
+<h2>方案 2：真3D 方塊 / 體素風 (Three.js)</h2>
+<div id="stage"></div>
+<p>真實3D空間 + 方塊角色；攝影機跟隨玩家斜後方，海嘯為立體方塊牆從遠端真實推進。視覺深度感最接近你描述的"海嘯像牆衝過來"。</p>
+<div class="legend">
+  <span style="background:#d04040"></span>玩家(背面)
+  <span style="background:#1565c0"></span>海嘯方塊牆
+  <span style="background:#ffd700"></span>寶藏(旋轉)
+  <span style="background:#1a1208"></span>避難坑
+  <span style="background:#ff3333"></span>安全界線
+  <span style="background:#888"></span>基地
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const W = 680, H = 510;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 40, 120);
+
+const camera = new THREE.PerspectiveCamera(55, W/H, 0.1, 200);
+camera.position.set(0, 5, 9);
+camera.lookAt(0, 1, -15);
+
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setSize(W, H);
+renderer.setPixelRatio(1);
+document.getElementById('stage').appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(10, 20, 10);
+scene.add(dir);
+
+// runway (sand)
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(20, 200),
+  new THREE.MeshLambertMaterial({ color: 0xc9a96a })
+);
+ground.rotation.x = -Math.PI/2;
+ground.position.z = -90;
+scene.add(ground);
+
+// side grass
+[-30, 30].forEach(x => {
+  const g = new THREE.Mesh(
+    new THREE.PlaneGeometry(40, 200),
+    new THREE.MeshLambertMaterial({ color: 0x3a7d3a })
+  );
+  g.rotation.x = -Math.PI/2;
+  g.position.set(x, -0.05, -90);
+  scene.add(g);
+});
+
+// mountains on sides
+[-50, 50].forEach(x => {
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(20, 10, 200),
+    new THREE.MeshLambertMaterial({ color: 0x8B4513 })
+  );
+  m.position.set(x, 5, -90);
+  scene.add(m);
+});
+
+// runway stripes for depth feel
+for (let z = 0; z > -180; z -= 10){
+  const stripe = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.4, 2),
+    new THREE.MeshBasicMaterial({ color: 0xa8884a })
+  );
+  stripe.rotation.x = -Math.PI/2;
+  stripe.position.set(0, 0.02, z);
+  scene.add(stripe);
+}
+
+// safety line (red, in front of base)
+const line = new THREE.Mesh(
+  new THREE.PlaneGeometry(20, 0.5),
+  new THREE.MeshBasicMaterial({ color: 0xff3333 })
+);
+line.rotation.x = -Math.PI/2;
+line.position.set(0, 0.03, 2);
+scene.add(line);
+
+// player (back-facing, blocky)
+const player = new THREE.Group();
+const mk = (w,h,d,c) => new THREE.Mesh(new THREE.BoxGeometry(w,h,d), new THREE.MeshLambertMaterial({color:c}));
+const torso = mk(1.2, 1.3, 0.7, 0xd04040); torso.position.y = 1.55; player.add(torso);
+const head  = mk(0.9, 0.9, 0.9, 0xf0c090); head.position.y = 2.65; player.add(head);
+const hair  = mk(0.92, 0.35, 0.92, 0x3a2a1a); hair.position.y = 2.95; player.add(hair);
+const legL  = mk(0.45, 1, 0.55, 0x1a1a4a); legL.position.set(-0.32, 0.5, 0); player.add(legL);
+const legR  = mk(0.45, 1, 0.55, 0x1a1a4a); legR.position.set( 0.32, 0.5, 0); player.add(legR);
+const pack  = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); player.add(pack);
+player.position.set(0, 0, 5);
+scene.add(player);
+
+// base (gray block behind player)
+const base = mk(10, 3.5, 5, 0x888888);
+base.position.set(0, 1.75, 10);
+scene.add(base);
+const baseRoof = mk(10.2, 0.4, 5.2, 0x666666);
+baseRoof.position.set(0, 3.6, 10);
+scene.add(baseRoof);
+// flag
+const pole = mk(0.15, 2.2, 0.15, 0x3a2a1a);
+pole.position.set(-3.5, 4.7, 10);
+scene.add(pole);
+const flag = mk(1.2, 0.7, 0.05, 0xaa4040);
+flag.position.set(-2.85, 5.4, 10);
+scene.add(flag);
+
+// coins
+const coinGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+const coinMat = new THREE.MeshLambertMaterial({ color: 0xffd700 });
+const coins = [];
+[[-3,-8],[4,-18],[-2,-30],[5,-42],[-6,-55],[3,-68],[0,-82],[-4,-95],[5,-110]].forEach(([x,z]) => {
+  const c = new THREE.Mesh(coinGeo, coinMat);
+  c.position.set(x, 0.7, z);
+  scene.add(c);
+  coins.push(c);
+});
+
+// pits
+[[5,-22],[-4,-48],[0,-75],[3,-100]].forEach(([x,z]) => {
+  const p = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.8, 2.8),
+    new THREE.MeshBasicMaterial({ color: 0x1a1208 })
+  );
+  p.rotation.x = -Math.PI/2;
+  p.position.set(x, 0.04, z);
+  scene.add(p);
+  // rim
+  const rim = new THREE.Mesh(
+    new THREE.PlaneGeometry(3.2, 3.2),
+    new THREE.MeshBasicMaterial({ color: 0x3a2a1a })
+  );
+  rim.rotation.x = -Math.PI/2;
+  rim.position.set(x, 0.03, z);
+  scene.add(rim);
+});
+
+// tsunami wall
+const tsunamiGroup = new THREE.Group();
+const wall = mk(40, 6, 3, 0x1565c0);
+wall.position.y = 3;
+tsunamiGroup.add(wall);
+const wallDark = mk(40, 1, 3.05, 0x0d47a1);
+wallDark.position.y = 0.5;
+tsunamiGroup.add(wallDark);
+// foam blocks on top
+for (let i = -19; i <= 19; i += 2){
+  const f = mk(2, 1.2, 3.3, 0xffffff);
+  f.position.set(i, 6.6, 0);
+  f.userData = { phase: i * 0.3 };
+  tsunamiGroup.add(f);
+}
+tsunamiGroup.position.z = -90;
+scene.add(tsunamiGroup);
+
+let t = 0;
+function animate(){
+  t += 0.016;
+  // tsunami approach
+  tsunamiGroup.position.z += 0.07;
+  if (tsunamiGroup.position.z > -3) tsunamiGroup.position.z = -100;
+  // foam undulation
+  tsunamiGroup.children.forEach(child => {
+    if (child.userData.phase !== undefined){
+      child.position.y = 6.6 + Math.sin(t * 4 + child.userData.phase) * 0.25;
+    }
+  });
+  // coins rotate + bob
+  coins.forEach((c, i) => {
+    c.rotation.y = t * 2 + i;
+    c.position.y = 0.7 + Math.sin(t * 3 + i) * 0.12;
+  });
+  // player idle bob + leg swing (back view, "running")
+  player.position.y = Math.abs(Math.sin(t * 6)) * 0.1;
+  legL.rotation.x =  Math.sin(t * 8) * 0.5;
+  legR.rotation.x = -Math.sin(t * 8) * 0.5;
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>

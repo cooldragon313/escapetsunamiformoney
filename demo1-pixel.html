@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>方案1 - 2D 偽3D 像素風</title>
+<style>
+  body { margin:0; background:#1a1a1a; color:#eee; font-family: monospace;
+         display:flex; flex-direction:column; align-items:center; padding:20px; min-height:100vh; box-sizing:border-box; }
+  h2 { margin: 8px 0; }
+  p { color: #aaa; font-size: 13px; max-width: 680px; text-align:center; line-height:1.6; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges;
+           border: 2px solid #444; background:#87ceeb; }
+  .legend { margin-top: 12px; font-size: 12px; color: #999; text-align:left; max-width: 680px; }
+  .legend span { display:inline-block; width:14px; height:14px; vertical-align:middle; margin-right:4px; border:1px solid #555; }
+</style>
+</head>
+<body>
+<h2>方案 1：2D 偽3D 像素風 (Canvas)</h2>
+<canvas id="c" width="320" height="240" style="width:680px; height:510px;"></canvas>
+<p>俯視斜角 + 像素方塊；玩家固定在畫面下方，跑道往遠方收斂；海嘯為畫面遠端的藍色牆面，會慢慢推進到玩家面前。</p>
+<div class="legend">
+  <span style="background:#d04040"></span>玩家(背面)
+  <span style="background:#1565c0"></span>海嘯牆
+  <span style="background:#ffd700"></span>寶藏
+  <span style="background:#3a2a1a"></span>避難坑
+  <span style="background:#ff4444"></span>安全界線
+  <span style="background:#888"></span>基地
+</div>
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const W = 320, H = 240;
+const horizon = H * 0.4;
+const runwayWidthFar = 50;
+const runwayWidthNear = 280;
+
+let tsunamiDepth = 0.85;
+let time = 0;
+
+const projectY = d => horizon + (H - horizon) * (1 - d);
+const projectScale = d => 1 - d * 0.85;
+const halfWidth = d => (runwayWidthNear/2) * (1 - d) + (runwayWidthFar/2) * d;
+const screenX = (worldX, d) => W/2 + worldX * (1 - d * 0.8);
+
+const coins = [
+  {d:0.20, x:-40},{d:0.32, x: 30},{d:0.42, x:-10},
+  {d:0.55, x: 60},{d:0.62, x:-55},{d:0.72, x: 20},{d:0.80, x:-25}
+];
+const pits = [{d:0.30,x: 60},{d:0.50,x:-40},{d:0.68,x: 0}];
+
+function drawSky(){
+  ctx.fillStyle = '#87ceeb';
+  ctx.fillRect(0, 0, W, horizon);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(40, 20, 30, 5);
+  ctx.fillRect(72, 24, 18, 4);
+  ctx.fillRect(180, 18, 38, 5);
+  ctx.fillRect(222, 26, 14, 4);
+  ctx.fillStyle = '#ffeb6e';
+  ctx.fillRect(260, 14, 14, 14);
+}
+
+function drawGround(){
+  ctx.fillStyle = '#3a7d3a';
+  ctx.fillRect(0, horizon, W, H - horizon);
+  ctx.fillStyle = '#c9a96a';
+  ctx.beginPath();
+  ctx.moveTo(W/2 - runwayWidthFar/2, horizon);
+  ctx.lineTo(W/2 + runwayWidthFar/2, horizon);
+  ctx.lineTo(W/2 + runwayWidthNear/2, H);
+  ctx.lineTo(W/2 - runwayWidthNear/2, H);
+  ctx.closePath();
+  ctx.fill();
+  // perspective grid lines (scrolling)
+  ctx.strokeStyle = '#a8884a';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 10; i++){
+    const offset = (time * 0.003) % 0.1;
+    const d = (i / 10) + offset;
+    if (d <= 0 || d >= 1) continue;
+    const y = projectY(d);
+    const hw = halfWidth(d);
+    ctx.beginPath();
+    ctx.moveTo(W/2 - hw, y);
+    ctx.lineTo(W/2 + hw, y);
+    ctx.stroke();
+  }
+}
+
+function drawSafetyLine(){
+  const d = 0.10, y = projectY(d), hw = halfWidth(d);
+  ctx.fillStyle = '#ff4444';
+  ctx.fillRect(W/2 - hw, y - 1, hw * 2, 2);
+}
+
+function drawPits(){
+  pits.forEach(p => {
+    const y = projectY(p.d), x = screenX(p.x, p.d), s = projectScale(p.d);
+    const w = 22 * s, h = 7 * s;
+    ctx.fillStyle = '#3a2a1a';
+    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#1a1208';
+    ctx.beginPath(); ctx.ellipse(x, y - h*0.25, w*0.8, h*0.6, 0, 0, Math.PI*2); ctx.fill();
+  });
+}
+
+function drawCoins(){
+  coins.forEach((c, i) => {
+    const y = projectY(c.d), x = screenX(c.x, c.d), s = projectScale(c.d);
+    const sz = Math.max(2, Math.floor(6 * s));
+    const bob = Math.sin(time * 0.1 + i) * 1;
+    ctx.fillStyle = '#ffd700';
+    ctx.fillRect(Math.floor(x - sz/2), Math.floor(y - sz - bob), sz, sz);
+    ctx.fillStyle = '#fff7a0';
+    ctx.fillRect(Math.floor(x - sz/2 + 1), Math.floor(y - sz + 1 - bob), 1, 1);
+  });
+}
+
+function drawTsunami(){
+  const d = tsunamiDepth, y = projectY(d), hw = halfWidth(d) + 30, s = projectScale(d);
+  const wallH = 36 * s;
+  ctx.fillStyle = '#1565c0';
+  ctx.fillRect(W/2 - hw, y - wallH, hw * 2, wallH);
+  ctx.fillStyle = '#1976d2';
+  ctx.fillRect(W/2 - hw, y - wallH * 0.6, hw * 2, 2 * s);
+  // foam top
+  ctx.fillStyle = '#fff';
+  for (let x = -hw; x < hw; x += 4){
+    const fx = W/2 + x;
+    const fh = 2 + Math.sin((x + time * 6) * 0.25) * 1.5;
+    ctx.fillRect(Math.floor(fx), Math.floor(y - wallH - fh), 4, Math.ceil(fh) + 1);
+  }
+  ctx.fillStyle = '#0d47a1';
+  ctx.fillRect(W/2 - hw, y - 3, hw * 2, 3);
+}
+
+function drawPlayer(){
+  const d = 0.05, y = projectY(d), x = W/2;
+  const bob = Math.floor(Math.sin(time * 0.25) * 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath(); ctx.ellipse(x, y, 8, 3, 0, 0, Math.PI*2); ctx.fill();
+  // legs (animated)
+  const legSwing = Math.sin(time * 0.4) * 2;
+  ctx.fillStyle = '#1a1a4a';
+  ctx.fillRect(x - 4, y - 9 + bob + Math.abs(legSwing), 3, 9);
+  ctx.fillRect(x + 1, y - 9 + bob - Math.abs(legSwing) + 2, 3, 9);
+  // torso
+  ctx.fillStyle = '#d04040';
+  ctx.fillRect(x - 6, y - 17 + bob, 12, 9);
+  // arms
+  ctx.fillStyle = '#f0c090';
+  ctx.fillRect(x - 7, y - 16 + bob + legSwing, 2, 6);
+  ctx.fillRect(x + 5, y - 16 + bob - legSwing, 2, 6);
+  // head
+  ctx.fillStyle = '#f0c090';
+  ctx.fillRect(x - 4, y - 24 + bob, 8, 7);
+  // hair (back)
+  ctx.fillStyle = '#3a2a1a';
+  ctx.fillRect(x - 4, y - 24 + bob, 8, 3);
+  // backpack
+  ctx.fillStyle = '#5a3a1a';
+  ctx.fillRect(x - 3, y - 15 + bob, 6, 5);
+  ctx.fillStyle = '#3a2a0a';
+  ctx.fillRect(x - 3, y - 13 + bob, 6, 1);
+}
+
+function drawBase(){
+  // base structures flanking the runway at near depth
+  ctx.fillStyle = '#888';
+  ctx.fillRect(0, H - 40, 50, 40);
+  ctx.fillRect(W - 50, H - 40, 50, 40);
+  ctx.fillStyle = '#666';
+  ctx.fillRect(0, H - 40, 50, 4);
+  ctx.fillRect(W - 50, H - 40, 50, 4);
+  ctx.fillStyle = '#444';
+  ctx.fillRect(10, H - 30, 8, 12);
+  ctx.fillRect(28, H - 30, 8, 12);
+  ctx.fillRect(W - 36, H - 30, 8, 12);
+  ctx.fillRect(W - 18, H - 30, 8, 12);
+  // flag
+  ctx.fillStyle = '#3a2a1a';
+  ctx.fillRect(20, H - 60, 2, 22);
+  ctx.fillStyle = '#aa4040';
+  ctx.fillRect(22, H - 60, 10, 6);
+}
+
+function frame(){
+  time++;
+  drawSky();
+  drawGround();
+  drawSafetyLine();
+  drawPits();
+  drawCoins();
+  drawTsunami();
+  drawBase();
+  drawPlayer();
+  // tsunami slow approach
+  tsunamiDepth -= 0.0018;
+  if (tsunamiDepth < 0.18) tsunamiDepth = 0.92;
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
