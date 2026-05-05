@@ -357,7 +357,7 @@ spawnInitialCoins();
 // ============================================================
 const pits = [];
 function spawnPits(){
-  let z = -22;
+  let z = -50;   // first pit pushed further from base so opening 50m is clear
   while (z > -RUNWAY_LEN + 20){
     const dist = -z;
     const zone = Math.min(NUM_ZONES - 1, Math.floor(dist / ZONE_LEN));
@@ -365,13 +365,15 @@ function spawnPits(){
     const baseSpacing = 22 + zone * 16;
     const jitter = baseSpacing * 0.18;
     const spacing = baseSpacing + (Math.random() - 0.5) * 2 * jitter;
+    // Zone 0 pits are visibly smaller and gentler — train without trapping
+    const sizeMul = zone === 0 ? 0.65 : 1.0;
     const x = (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 5);
-    const rim  = mkPlane(8, 6, 0x3a2a1a);
-    const hole = mkPlane(6.4, 4.6, 0x0a0604);
+    const rim  = mkPlane(8 * sizeMul, 6 * sizeMul, 0x3a2a1a);
+    const hole = mkPlane(6.4 * sizeMul, 4.6 * sizeMul, 0x0a0604);
     rim.position.set(x, 0.03, z);
     hole.position.set(x, 0.04, z);
     scene.add(rim); scene.add(hole);
-    pits.push({ x, z, rx: 3.5, rz: 2.5 });
+    pits.push({ x, z, rx: 3.5 * sizeMul, rz: 2.5 * sizeMul, zone });
     z -= spacing;
   }
 }
@@ -762,12 +764,14 @@ function update(now){
       const dz = (player.position.z - p.z) / p.rz;
       if (dx*dx + dz*dz < 1){
         state.inPit = p;
-        // Pit stuck-time scales DOWN with jump upgrade; without upgrade you're trapped a long time.
+        // Stuck time scales with pit zone AND jump upgrade.
+        // Zone 0 = 4s base (forgiving), zone 4 = 14s (must upgrade jump).
         const jumpLv = state.upgrades.jump;
-        const stuckTime = Math.max(2, 14 - jumpLv * 1.6);
+        const baseStuck = 4 + (p.zone ?? 0) * 2.5;
+        const stuckTime = Math.max(2, baseStuck - jumpLv * 1.6);
         state.pitUntil = performance.now() + stuckTime * 1000;
         player.position.y = -1.4;
-        toast(`進坑！跳出需 ${stuckTime.toFixed(0)} 秒（升跳高縮短）`);
+        toast(`進坑！${stuckTime.toFixed(0)} 秒後爬出（升跳高縮短）`);
         break;
       }
     }
