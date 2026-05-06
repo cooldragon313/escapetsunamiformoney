@@ -642,8 +642,23 @@ window.addEventListener('keyup', e => { keys[e.code] = false; });
 
 // ----- Touch / virtual joystick -----
 const touchInput = { jx: 0, jy: 0, jump: false, sprint: false };
+function enableTouchUI(){
+  if (!document.body.classList.contains('touch-mode')){
+    document.body.classList.add('touch-mode');
+  }
+}
 const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-if (isTouchDevice) document.body.classList.add('touch-mode');
+if (isTouchDevice) enableTouchUI();
+// Lazy detection: some tablets/browsers report no touch capability up front.
+// First real touch / pen event flips the UI on.
+window.addEventListener('touchstart', enableTouchUI, { passive: true });
+window.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch' || e.pointerType === 'pen') enableTouchUI();
+}, { passive: true });
+// Manual toggle for debugging / desktop testing
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyT' && !shopOpen) document.body.classList.toggle('touch-mode');
+});
 
 const STICK_RADIUS = 55;
 const stickEl = document.getElementById('stick');
