@@ -210,6 +210,11 @@
                     border: 2px solid #ffd700; font-size: 16px; font-weight: bold;
                     display: none; pointer-events: none; box-shadow: 0 0 16px rgba(255,215,0,0.4); }
   #hilltop-prompt.show { display: block; }
+  #plot-prompt { position: fixed; bottom: 165px; left: 50%; transform: translateX(-50%);
+                 background: rgba(40,30,0,0.85); color: #ffee66; padding: 8px 18px;
+                 border: 2px solid #ffaa44; font-size: 14px; font-weight: bold;
+                 display: none; pointer-events: none; box-shadow: 0 0 14px rgba(255,170,68,0.4); }
+  #plot-prompt.show { display: block; }
   #hud .value.flash { animation: moneyFlash 0.7s ease-out; }
   @keyframes moneyFlash {
     0%   { transform: scale(1); color: #ffd700; }
@@ -369,6 +374,7 @@
 <div id="warn">海 嘯 警 報</div>
 <div id="toast"></div>
 <div id="hilltop-prompt"></div>
+<div id="plot-prompt"></div>
 
 <div id="death">
   <div>你 被 海 嘯 吞 噬</div>
@@ -409,7 +415,7 @@
   <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 左右 ·
   <kbd>Space</kbd> 跳躍 ·
   <kbd>Shift</kbd> 衝刺 ·
-  <kbd>B</kbd> 升級商店 / <kbd>C</kbd> 造型店（山頂） ·
+  <kbd>B</kbd> 升級商店 / <kbd>C</kbd> 造型店（山頂）/ <kbd>P</kbd> 購買地塊（後院）·
   <kbd>右鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
   跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
   <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
@@ -624,6 +630,73 @@ scene.add(shopSign);
 const beacon = mk(0.4, 0.3, 0.4, 0xffdd00);
 beacon.position.set(0, HILL_PEAK + 0.2, PEAK_Z);
 scene.add(beacon);
+
+// ============================================================
+// BACKYARD — open area behind the base where players can buy plots
+// ============================================================
+const PLOT_SIZE = 12;
+const PLOT_PRICE = 500;
+const PLOT_PROMPT_RADIUS = 5;
+const PLOTS = [];
+{
+  let pid = 1;
+  for (let row = 0; row < 3; row++){
+    for (let col = 0; col < 3; col++){
+      PLOTS.push({
+        id: 'plot' + pid++,
+        x: -16 + col * 16,
+        z: 28 + row * 18,
+        ownerId: null,
+        ownerName: '',
+        tile: null,
+        sign: null,
+      });
+    }
+  }
+}
+// Backyard grass
+const backyard = mkPlane(120, 70, 0x55aa55);
+backyard.position.set(0, 0.005, 53);
+scene.add(backyard);
+// Plot tiles
+PLOTS.forEach(p => {
+  const border = mkPlane(PLOT_SIZE + 0.5, PLOT_SIZE + 0.5, 0x3a2a1a);
+  border.position.set(p.x, 0.012, p.z);
+  scene.add(border);
+  const tile = mkPlane(PLOT_SIZE, PLOT_SIZE, 0xc9a96a);
+  tile.position.set(p.x, 0.014, p.z);
+  scene.add(tile);
+  p.tile = tile;
+});
+
+function makeConstructionSign(ownerName){
+  const g = new THREE.Group();
+  const pole = mk(0.2, 2, 0.2, 0x3a2a1a); pole.position.y = 1; g.add(pole);
+  const board = mk(3, 1.4, 0.15, 0xeebb22); board.position.y = 2.2; g.add(board);
+  for (let i = -1; i <= 1; i++){
+    const s = mk(3.05, 0.22, 0.18, 0x222222);
+    s.position.set(0, 2.2 + i * 0.4, 0.05);
+    s.rotation.z = -0.45;
+    g.add(s);
+  }
+  const cL = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.0, 6), new THREE.MeshLambertMaterial({color:0xff6600}));
+  cL.position.set(-2.2, 0.5, 0.5); g.add(cL);
+  const cR = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.0, 6), new THREE.MeshLambertMaterial({color:0xff6600}));
+  cR.position.set( 2.2, 0.5, 0.5); g.add(cR);
+  const label = makeNameLabel(`${ownerName} · 建築中`);
+  label.scale.set(3.4, 0.85, 1);
+  label.position.y = 3.5;
+  g.add(label);
+  return g;
+}
+function showPlotSign(plot){
+  if (plot.sign){ scene.remove(plot.sign); plot.sign = null; }
+  if (!plot.ownerId) return;
+  const sg = makeConstructionSign(plot.ownerName || '???');
+  sg.position.set(plot.x, 0, plot.z);
+  scene.add(sg);
+  plot.sign = sg;
+}
 
 // ============================================================
 // COINS
@@ -1178,6 +1251,22 @@ window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyB') toggleShop();
   if (e.code === 'KeyC') toggleCosShop();
+  if (e.code === 'KeyP' && state.plotPromptId && state.money >= PLOT_PRICE){
+    state.money -= PLOT_PRICE;
+    saveProgress();
+    if (mpAuthoritative && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+      mpSocket.send(JSON.stringify({ type: 'plot_buy', plotId: state.plotPromptId }));
+    } else {
+      const p = PLOTS.find(x => x.id === state.plotPromptId);
+      if (p){
+        p.ownerId = 'local';
+        p.ownerName = state.custom?.name || '我';
+        showPlotSign(p);
+        toast(`購買「${p.id}」完成！`);
+      }
+    }
+    sfx.buy();
+  }
   if (e.code === 'Escape'){
     if (shopOpen) toggleShop();
     else if (cosShopOpen) toggleCosShop();
@@ -1446,6 +1535,7 @@ const hud = {
   shopMoney: document.getElementById('shop-money'),
   toast: document.getElementById('toast'),
   hilltopPrompt: document.getElementById('hilltop-prompt'),
+  plotPrompt: document.getElementById('plot-prompt'),
   stormIndicator: document.getElementById('storm-indicator'),
   buffSpeed: document.getElementById('buff-speed'),
   buffJump: document.getElementById('buff-jump'),
@@ -1801,7 +1891,7 @@ function update(now){
     }
     // clamp
     player.position.x = Math.max(-RUNWAY_HALF_W + 0.6, Math.min(RUNWAY_HALF_W - 0.6, player.position.x));
-    player.position.z = Math.min(HILL_END_Z, Math.max(-RUNWAY_LEN + 5, player.position.z));
+    player.position.z = Math.min(80, Math.max(-RUNWAY_LEN + 5, player.position.z));
 
     // jump (jump-buff multiplies the impulse)
     const floor = floorAt(player.position.x, player.position.z);
@@ -1970,6 +2060,32 @@ function update(now){
   // ----- Sound when first entering hilltop area -----
   if (state.alive && inBase() && !state._wasInBase){ sfx.baseEnter(); state._wasInBase = true; }
   if (!inBase()) state._wasInBase = false;
+
+  // ----- Plot proximity prompt -----
+  state.plotPromptId = null;
+  if (state.alive && player.position.z > 20){
+    let nearest = null, bestSq = PLOT_PROMPT_RADIUS * PLOT_PROMPT_RADIUS;
+    for (const p of PLOTS){
+      if (p.ownerId) continue;
+      const dx = player.position.x - p.x;
+      const dz = player.position.z - p.z;
+      const d = dx*dx + dz*dz;
+      if (d < bestSq){ bestSq = d; nearest = p; }
+    }
+    if (nearest){
+      if (state.money >= PLOT_PRICE){
+        hud.plotPrompt.textContent = `按 P 購買「${nearest.id}」($${PLOT_PRICE})`;
+        state.plotPromptId = nearest.id;
+      } else {
+        hud.plotPrompt.textContent = `空地需 $${PLOT_PRICE}（你 $${state.money}）`;
+      }
+      hud.plotPrompt.classList.add('show');
+    } else {
+      hud.plotPrompt.classList.remove('show');
+    }
+  } else {
+    hud.plotPrompt.classList.remove('show');
+  }
 
   // ----- Hilltop spend prompt -----
   if (state.alive && inBase() && state.money > 0 && !shopOpen && !cosShopOpen){
@@ -2552,6 +2668,16 @@ function mpHandleMessage(raw){
       (msg.chests || []).forEach(addChestFromServer);
       removeBigTreasureMesh();
       if (msg.bigTreasure) spawnBigTreasureMesh(msg.bigTreasure.x, msg.bigTreasure.z);
+      // Sync plots
+      if (Array.isArray(msg.plots)){
+        msg.plots.forEach(srvP => {
+          const p = PLOTS.find(x => x.id === srvP.id);
+          if (!p) return;
+          p.ownerId = srvP.ownerId;
+          p.ownerName = srvP.ownerName;
+          showPlotSign(p);
+        });
+      }
       for (const ts of tsunamis) scene.remove(ts.obj.group);
       tsunamis.length = 0;
       msg.waves.forEach(addServerWave);
@@ -2660,6 +2786,15 @@ function mpHandleMessage(raw){
   } else if (msg.type === 'coin_spawn'){
     // Server spawned a fresh coin (e.g. spillover from a chest pickup)
     addCoinFromServer(msg.coin);
+  } else if (msg.type === 'plot_owned'){
+    const p = PLOTS.find(x => x.id === msg.plotId);
+    if (p){
+      p.ownerId = msg.ownerId;
+      p.ownerName = msg.ownerName;
+      showPlotSign(p);
+      if (msg.ownerId === mpMyId) toast(`購買「${p.id}」完成！`);
+      else toast(`${msg.ownerName} 買下「${p.id}」`);
+    }
   } else if (msg.type === 'big_treasure_spawn'){
     spawnBigTreasureMesh(msg.x, msg.z);
     toast('★ 大寶箱重新出現！($' + msg.value + ')');

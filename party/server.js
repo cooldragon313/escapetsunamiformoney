@@ -62,6 +62,23 @@ export default class WorldServer {
       x: 0, z: BIG_TREASURE_Z,
       value: BIG_TREASURE_VALUE,
     };
+    // Plots: 9-tile grid behind the base. ownerId is the connection id of the
+    // current owner (or null if for sale).
+    this.plots = [];
+    {
+      let pid = 1;
+      for (let row = 0; row < 3; row++){
+        for (let col = 0; col < 3; col++){
+          this.plots.push({
+            id: 'plot' + pid++,
+            x: -16 + col * 16,
+            z: 28 + row * 18,
+            ownerId: null,
+            ownerName: '',
+          });
+        }
+      }
+    }
     this.lastTick = Date.now();
     this.tickHandle = setInterval(() => this.tick(), 50);
   }
@@ -240,6 +257,9 @@ export default class WorldServer {
       bigTreasure: this.bigTreasure.available ? {
         x: this.bigTreasure.x, z: this.bigTreasure.z, value: this.bigTreasure.value,
       } : null,
+      plots: this.plots.map(p => ({
+        id: p.id, ownerId: p.ownerId, ownerName: p.ownerName,
+      })),
       waves: this.waves,
       storm: this.storm,
     }));
@@ -323,6 +343,17 @@ export default class WorldServer {
         type: 'chest_spawn',
         id: chest.id, x: chest.x, z: chest.z,
         value, slots, ownerName: chest.ownerName,
+      });
+    } else if (msg.type === 'plot_buy'){
+      const plot = this.plots.find(p => p.id === msg.plotId);
+      if (!plot || plot.ownerId) return;
+      plot.ownerId = sender.id;
+      plot.ownerName = player.name;
+      this.broadcast({
+        type: 'plot_owned',
+        plotId: plot.id,
+        ownerId: sender.id,
+        ownerName: player.name,
       });
     } else if (msg.type === 'big_treasure_attempt'){
       if (this.bigTreasure.available){
