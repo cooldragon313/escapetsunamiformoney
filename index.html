@@ -454,7 +454,7 @@
   <kbd>Space</kbd> 跳躍 ·
   <kbd>Shift</kbd> 衝刺 ·
   <kbd>B</kbd> 升級店 / <kbd>C</kbd> 造型店 / <kbd>P</kbd> 買地 / <kbd>H</kbd> 蓋房子 ·
-  <kbd>右鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
+  <kbd>左鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
   跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
   <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
   <span style="color:#5588ff">藍標準</span> · <span style="color:#ff5050">紅快</span> · <span style="color:#88aaff">寬</span> · <span style="color:#aa88ff">紫巨/黑災 必躲坑</span>
@@ -1563,8 +1563,8 @@ stageEl.addEventListener('pointerdown', e => {
   // Skip if pointer is on a touch UI control (stick or button)
   if (e.target.closest && (e.target.closest('#stick') || e.target.closest('.touch-btn'))) return;
   const isTouch = e.pointerType !== 'mouse';
-  const isRightClick = e.pointerType === 'mouse' && e.button === 2;
-  if (!isTouch && !isRightClick) return;
+  const isLeftClick = e.pointerType === 'mouse' && e.button === 0;
+  if (!isTouch && !isLeftClick) return;
   if (camDragId !== null) return;
   e.preventDefault();
   camDragId = e.pointerId;
