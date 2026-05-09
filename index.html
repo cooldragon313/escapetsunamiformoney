@@ -14,11 +14,11 @@
   #hud .label { color:#888; }
   #hud .value { color:#fff; font-weight: bold; }
   #hud .gold  { color: #ffd700; }
-  #audio-toggle { background: none; border: none; cursor: pointer;
-                  color: white; font-size: 16px; padding: 2px 6px;
-                  font-family: monospace; line-height: 1;
-                  pointer-events: auto; }
-  #audio-toggle.muted { opacity: 0.4; }
+  #sfx-toggle, #bgm-toggle { background: none; border: none; cursor: pointer;
+                              color: white; font-size: 16px; padding: 2px 6px;
+                              font-family: monospace; line-height: 1;
+                              pointer-events: auto; }
+  #sfx-toggle.muted, #bgm-toggle.muted { opacity: 0.4; }
   #zone-tag { position: fixed; top: 12px; right: 12px; padding: 8px 14px;
               background: rgba(0,0,0,0.55); border: 2px solid #444; font-size: 14px; }
   #warn { position: fixed; top: 26%; left: 50%; transform: translate(-50%, -50%);
@@ -285,7 +285,9 @@
   <div class="row"><span class="label">區域</span><span class="value" id="zone">基地</span></div>
   <div class="row"><span class="label">距離</span><span class="value" id="dist">0 m</span></div>
   <div class="row"><span class="label">最遠</span><span class="value" id="max-dist">0 m</span></div>
-  <div class="row"><span class="label">音效</span><button id="audio-toggle" type="button" title="切換音效">🔊</button></div>
+  <div class="row"><span class="label">音效</span><button id="sfx-toggle" type="button" title="切換音效">🔊</button></div>
+  <div class="row"><span class="label">音樂</span><button id="bgm-toggle" type="button" title="切換 BGM">🎵</button></div>
+  <div class="row"><span class="label">⚡ 加速</span><span class="value" id="buff-speed">—</span></div>
 </div>
 
 <div id="zone-tag"><span id="storm-indicator" style="display:none; color:#ff6644; font-weight:bold;">⚡ 暴風雨 ⚡ </span>回山頂按 <kbd>B</kbd> 開商店</div>
@@ -541,11 +543,53 @@ function clearAllCoins(){
   for (const c of coins){ if (c.mesh) scene.remove(c.mesh); }
   coins.length = 0;
 }
-// In single-player mode coins spawn locally; in MP they arrive via 'init'.
-// We may flip mpAuthoritative=false at runtime if the server is older than 1B
-// (didn't send a coins[] in init), in which case we fall back to local spawn.
+
+// ----- Power-ups (speed boost, etc) -----
+const powerups = [];
+const POWERUP_VISUALS = {
+  speed: { color: 0xff3333, emissive: 0xff5500 },
+};
+function makePowerupMesh(type){
+  const v = POWERUP_VISUALS[type] || POWERUP_VISUALS.speed;
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 0.9, 0.9),
+    new THREE.MeshLambertMaterial({ color: v.color, emissive: v.emissive, emissiveIntensity: 0.6 })
+  );
+  return m;
+}
+function addPowerupFromServer(p){
+  const m = makePowerupMesh(p.type);
+  m.position.set(p.x, 1.0, p.z);
+  scene.add(m);
+  powerups.push({ id: p.id, mesh: m, x: p.x, z: p.z, type: p.type, collected: false, attempting: false });
+}
+function clearAllPowerups(){
+  for (const p of powerups){ if (p.mesh) scene.remove(p.mesh); }
+  powerups.length = 0;
+}
+function spawnInitialPowerupsLocal(){
+  let id = 1;
+  for (let zone = 0; zone < NUM_ZONES; zone++){
+    const zStart = -zone * ZONE_LEN - 30;
+    const zEnd   = -(zone + 1) * ZONE_LEN + 20;
+    const count  = 1 + (zone >= 2 ? 1 : 0);
+    for (let i = 0; i < count; i++){
+      const x = (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 3);
+      const z = zStart - Math.random() * (zStart - zEnd);
+      const m = makePowerupMesh('speed');
+      m.position.set(x, 1.0, z);
+      scene.add(m);
+      powerups.push({ id: id++, mesh: m, x, z, type: 'speed', collected: false, attempting: false });
+    }
+  }
+}
+
+// In single-player mode coins / powerups spawn locally; in MP they arrive via 'init'.
 let mpAuthoritative = MP_ENABLED;
-if (!MP_ENABLED) spawnInitialCoins();
+if (!MP_ENABLED){
+  spawnInitialCoins();
+  spawnInitialPowerupsLocal();
+}
 
 // ============================================================
 // PITS
@@ -862,6 +906,7 @@ const state = {
   tutorialStep: 0,
   cameraYaw: 0,                 // orbit angle around player (0 = behind)
   cameraPitch: 0.55,            // elevation angle (0 = horizontal, π/2 = top-down)
+  buffSpeedUntil: 0,            // local-time seconds; speed boost active while t < this
   nextSpawnIn: 4,             // randomized wait until next wave
   coinRefreshAccum: 0,
   lastExitedPit: null,
@@ -870,6 +915,14 @@ const state = {
   stormCooldownUntil: 25,      // earliest time (in t-seconds) for first storm
   stormBonusMultiplier: 1,
 };
+
+function applyBuff(type){
+  if (type === 'speed'){
+    state.buffSpeedUntil = Math.max(t + 10, state.buffSpeedUntil);
+    toast('⚡ 加速 10 秒！');
+    sfx.bigCoin();
+  }
+}
 
 function applyStats(){
   state.speed         = STATS_BASE.speed         + UPGRADE_DEF[0].step * state.upgrades.speed;
@@ -896,12 +949,15 @@ const hud = {
   toast: document.getElementById('toast'),
   hilltopPrompt: document.getElementById('hilltop-prompt'),
   stormIndicator: document.getElementById('storm-indicator'),
+  buffSpeed: document.getElementById('buff-speed'),
 };
 
 function updateHUD(){
   hud.money.textContent = state.money;
   hud.bag.textContent = `${state.bag} / ${state.carryMax}`;
   hud.stormIndicator.style.display = state.storm ? 'inline' : 'none';
+  const buffRem = state.buffSpeedUntil - t;
+  hud.buffSpeed.textContent = buffRem > 0 ? `${buffRem.toFixed(1)} 秒` : '—';
   const dist = Math.max(0, BASE_Z - player.position.z);
   hud.dist.textContent = `${Math.round(dist)} m`;
   if (dist > state.maxDist) state.maxDist = dist;
@@ -1059,6 +1115,7 @@ function update(now){
       analog = true;
     }
     const sprint = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.5 : 1.0;
+    const buff = (t < state.buffSpeedUntil) ? 1.5 : 1.0;
     if (!state.inPit && (mx !== 0 || mz !== 0)){
       if (!analog){
         const len = Math.hypot(mx, mz);
@@ -1069,7 +1126,7 @@ function update(now){
       const sy = Math.sin(state.cameraYaw);
       const worldMx =  mx * cy + mz * sy;
       const worldMz = -mx * sy + mz * cy;
-      const sp = state.speed * 60 * dt * sprint;
+      const sp = state.speed * 60 * dt * sprint * buff;
       player.position.x += worldMx * sp;
       player.position.z += worldMz * sp;
       // Face direction of motion
@@ -1166,6 +1223,27 @@ function update(now){
           c.collected = true;
           scene.remove(c.mesh);
           sfx.coin();
+        }
+      }
+    }
+  }
+
+  // ----- Power-up pickup -----
+  if (state.alive){
+    for (const p of powerups){
+      if (p.collected) continue;
+      const dx = player.position.x - p.x;
+      const dz = player.position.z - p.z;
+      if (dx*dx + dz*dz < state.pickupRadius * state.pickupRadius){
+        if (mpAuthoritative){
+          if (!p.attempting && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+            p.attempting = true;
+            mpSocket.send(JSON.stringify({ type: 'powerup_attempt', powerupId: p.id }));
+          }
+        } else {
+          p.collected = true;
+          if (p.mesh) scene.remove(p.mesh);
+          applyBuff(p.type);
         }
       }
     }
@@ -1336,6 +1414,14 @@ function update(now){
     }
   }
 
+  // ----- Powerup animation (spin + bob) -----
+  for (const p of powerups){
+    if (p.collected || !p.mesh) continue;
+    p.mesh.rotation.y = t * 2.5 + p.x * 0.2;
+    p.mesh.rotation.x = t * 1.4;
+    p.mesh.position.y = 1.0 + Math.sin(t * 3 + p.x) * 0.25;
+  }
+
   // ----- Camera follow (orbital, controlled by state.cameraYaw / cameraPitch) -----
   const camRadius = 9.5;
   const cosP = Math.cos(state.cameraPitch);
@@ -1388,7 +1474,9 @@ window.addEventListener('beforeunload', saveProgress);
 // AUDIO — Web Audio synth for snappy effects + optional file overrides
 // ============================================================
 const audioPrefs = {
-  enabled: localStorage.getItem('etfm-audio') !== 'off',
+  // Migrate legacy single 'etfm-audio' key into both sfx + bgm
+  sfx: (localStorage.getItem('etfm-sfx') ?? localStorage.getItem('etfm-audio')) !== 'off',
+  bgm: (localStorage.getItem('etfm-bgm') ?? localStorage.getItem('etfm-audio')) !== 'off',
   volume: parseFloat(localStorage.getItem('etfm-audio-vol') || '0.6'),
 };
 let audioCtx = null;
@@ -1417,7 +1505,7 @@ for (const [name, path] of Object.entries(SFX_FILES)){
 }
 function playFile(name, volume){
   const a = sfxFile[name];
-  if (!a || !audioPrefs.enabled) return false;
+  if (!a || !audioPrefs.sfx) return false;
   const c = a.cloneNode();
   c.volume = (volume ?? 1) * audioPrefs.volume;
   c.play().catch(() => {});
@@ -1425,7 +1513,7 @@ function playFile(name, volume){
 }
 // --- Synth primitives ---
 function tone(opts){
-  if (!audioPrefs.enabled) return;
+  if (!audioPrefs.sfx) return;
   const ctx = getAudioCtx(); if (!ctx) return;
   const { freq = 880, type = 'sine', duration = 0.12, volume = 0.3,
           attack = 0.005, freqEnd = null, delay = 0 } = opts;
@@ -1443,7 +1531,7 @@ function tone(opts){
   osc.stop(t0 + duration + 0.02);
 }
 function noiseBurst(opts){
-  if (!audioPrefs.enabled) return;
+  if (!audioPrefs.sfx) return;
   const ctx = getAudioCtx(); if (!ctx) return;
   const { duration = 0.2, volume = 0.2, lowpass = null, attack = 0.005, delay = 0 } = opts;
   const t0 = ctx.currentTime + delay;
@@ -1530,17 +1618,17 @@ bgmCandidates.forEach((a, idx) => {
 });
 
 function startBgm(){
-  if (!audioPrefs.enabled) return;
+  if (!audioPrefs.bgm) return;
   bgmRequested = true;
   if (bgmCurrent || bgmTracks.length === 0) return;
   bgmCurrentIdx = 0;
-  const t = bgmTracks[bgmCurrentIdx];
-  t.currentTime = 0;
-  t.volume = 0.28 * audioPrefs.volume;
-  t.play().then(() => { bgmCurrent = t; }).catch(() => {});
+  const t2 = bgmTracks[bgmCurrentIdx];
+  t2.currentTime = 0;
+  t2.volume = 0.28 * audioPrefs.volume;
+  t2.play().then(() => { bgmCurrent = t2; }).catch(() => {});
 }
 function advanceBgm(){
-  if (bgmTracks.length === 0) return;
+  if (bgmTracks.length === 0 || !audioPrefs.bgm) { bgmCurrent = null; return; }
   bgmCurrent = null;
   bgmCurrentIdx = (bgmCurrentIdx + 1) % bgmTracks.length;
   const next = bgmTracks[bgmCurrentIdx];
@@ -1550,7 +1638,7 @@ function advanceBgm(){
 }
 function refreshAudioVolumes(){
   if (!bgmCurrent) return;
-  if (audioPrefs.enabled){
+  if (audioPrefs.bgm){
     bgmCurrent.volume = 0.28 * audioPrefs.volume;
     if (bgmCurrent.paused) bgmCurrent.play().catch(() => {});
   } else {
@@ -1558,18 +1646,26 @@ function refreshAudioVolumes(){
   }
 }
 
-// --- Mute toggle UI ---
+// --- Mute toggle UI (separate SFX / BGM controls) ---
 (function(){
-  const btn = document.getElementById('audio-toggle');
+  const sfxBtn = document.getElementById('sfx-toggle');
+  const bgmBtn = document.getElementById('bgm-toggle');
   function render(){
-    btn.textContent = audioPrefs.enabled ? '🔊' : '🔇';
-    btn.classList.toggle('muted', !audioPrefs.enabled);
+    sfxBtn.textContent = audioPrefs.sfx ? '🔊' : '🔇';
+    sfxBtn.classList.toggle('muted', !audioPrefs.sfx);
+    bgmBtn.textContent = audioPrefs.bgm ? '🎵' : '🚫';
+    bgmBtn.classList.toggle('muted', !audioPrefs.bgm);
   }
-  btn.addEventListener('click', () => {
-    audioPrefs.enabled = !audioPrefs.enabled;
-    localStorage.setItem('etfm-audio', audioPrefs.enabled ? 'on' : 'off');
+  sfxBtn.addEventListener('click', () => {
+    audioPrefs.sfx = !audioPrefs.sfx;
+    localStorage.setItem('etfm-sfx', audioPrefs.sfx ? 'on' : 'off');
+    render();
+  });
+  bgmBtn.addEventListener('click', () => {
+    audioPrefs.bgm = !audioPrefs.bgm;
+    localStorage.setItem('etfm-bgm', audioPrefs.bgm ? 'on' : 'off');
     refreshAudioVolumes();
-    if (audioPrefs.enabled) startBgm();
+    if (audioPrefs.bgm) startBgm();
     render();
   });
   render();
@@ -1694,6 +1790,8 @@ function mpHandleMessage(raw){
       mpAuthoritative = true;
       clearAllCoins();
       msg.coins.forEach(addCoinFromServer);
+      clearAllPowerups();
+      (msg.powerups || []).forEach(addPowerupFromServer);
       for (const ts of tsunamis) scene.remove(ts.obj.group);
       tsunamis.length = 0;
       msg.waves.forEach(addServerWave);
@@ -1703,10 +1801,9 @@ function mpHandleMessage(raw){
         scene.fog.color.setHex(0x4a3030);
       }
     } else if (MP_ENABLED){
-      // Older / incompatible server — gracefully degrade to local spawning so
-      // the game is still playable. Each client sees their own coins / waves.
       mpAuthoritative = false;
       if (coins.length === 0) spawnInitialCoins();
+      if (powerups.length === 0) spawnInitialPowerupsLocal();
       toast('Server 為舊版，金幣/海嘯改本地生成');
     }
     toast(`連線成功（線上 ${msg.players.length} 人）`);
@@ -1761,6 +1858,21 @@ function mpHandleMessage(raw){
         c.mesh.position.set(c.x, 0.7, c.z);
         scene.add(c.mesh);
       }
+    }
+  } else if (msg.type === 'powerup_pickup'){
+    const p = powerups.find(x => x.id === msg.id);
+    if (p){
+      p.collected = true;
+      if (p.mesh) scene.remove(p.mesh);
+    }
+    if (msg.byId === mpMyId) applyBuff(msg.buffType);
+  } else if (msg.type === 'powerup_respawn'){
+    const p = powerups.find(x => x.id === msg.id);
+    if (p && p.mesh){
+      p.collected = false;
+      p.attempting = false;
+      p.mesh.position.set(p.x, 1.0, p.z);
+      scene.add(p.mesh);
     }
   } else if (msg.type === 'storm_start'){
     state.storm = true;

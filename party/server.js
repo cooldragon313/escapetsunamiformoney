@@ -10,6 +10,7 @@ const ZONE_LEN       = 200;
 const NUM_ZONES      = 5;
 const HILL_START_Z   = 4;
 const COIN_RESPAWN_MS = 60_000;
+const POWERUP_RESPAWN_MS = 45_000;
 
 const WAVE_TYPES = [
   { id:'green',  height:3.0, width:14, speedMul:1.0,  weight:18, storm:false },
@@ -46,8 +47,29 @@ export default class WorldServer {
     this.stormCooldownUntil = Date.now() + 25_000;
 
     this.spawnInitialCoins();
+    this.powerups = [];
+    this.spawnInitialPowerups();
     this.lastTick = Date.now();
     this.tickHandle = setInterval(() => this.tick(), 50);
+  }
+
+  spawnInitialPowerups(){
+    let id = 1;
+    for (let zone = 0; zone < NUM_ZONES; zone++){
+      const zStart = -zone * ZONE_LEN - 30;
+      const zEnd   = -(zone + 1) * ZONE_LEN + 20;
+      const count  = 1 + (zone >= 2 ? 1 : 0);   // 1 in zones 0-1, 2 in zones 2-4
+      for (let i = 0; i < count; i++){
+        this.powerups.push({
+          id: id++,
+          type: 'speed',
+          x: (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 3),
+          z: zStart - Math.random() * (zStart - zEnd),
+          available: true,
+          respawnAt: 0,
+        });
+      }
+    }
   }
 
   spawnInitialCoins(){
@@ -81,6 +103,14 @@ export default class WorldServer {
         c.available = true;
         c.respawnAt = 0;
         this.broadcast({ type: 'coin_respawn', id: c.id });
+      }
+    }
+    // Powerup respawn
+    for (const p of this.powerups){
+      if (!p.available && p.respawnAt && now >= p.respawnAt){
+        p.available = true;
+        p.respawnAt = 0;
+        this.broadcast({ type: 'powerup_respawn', id: p.id });
       }
     }
 
@@ -175,6 +205,9 @@ export default class WorldServer {
       coins: this.coins.filter(c => c.available).map(c => ({
         id: c.id, x: c.x, z: c.z, value: c.value,
       })),
+      powerups: this.powerups.filter(p => p.available).map(p => ({
+        id: p.id, x: p.x, z: p.z, type: p.type,
+      })),
       waves: this.waves,
       storm: this.storm,
     }));
@@ -221,6 +254,19 @@ export default class WorldServer {
           byId: sender.id,
           byName: player.name,
           value: coin.value,
+        });
+      }
+    } else if (msg.type === 'powerup_attempt'){
+      const p = this.powerups.find(x => x.id === msg.powerupId);
+      if (p && p.available){
+        p.available = false;
+        p.respawnAt = Date.now() + POWERUP_RESPAWN_MS;
+        this.broadcast({
+          type: 'powerup_pickup',
+          id: p.id,
+          buffType: p.type,
+          byId: sender.id,
+          byName: player.name,
         });
       }
     } else if (msg.type === 'chat'){
