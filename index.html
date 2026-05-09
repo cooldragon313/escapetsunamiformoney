@@ -115,7 +115,19 @@
   body.menu-mode #zone-tag,
   body.menu-mode #hilltop-prompt,
   body.menu-mode #warn,
-  body.menu-mode #toast { display: none !important; }
+  body.menu-mode #toast,
+  body.menu-mode #player-list { display: none !important; }
+  #player-list { position: fixed; top: 60px; right: 12px;
+                 background: rgba(0,0,0,0.55); border: 2px solid #444;
+                 padding: 8px 12px; min-width: 130px; max-width: 200px;
+                 font-family: monospace; font-size: 12px; line-height: 1.6;
+                 pointer-events: none; }
+  #player-list .title { color: #ffd700; font-weight: bold; margin-bottom: 4px;
+                        letter-spacing: 2px; }
+  #player-list .row { color: #cfd8e8; display: flex; align-items: center; gap: 6px; }
+  #player-list .row.me { color: #ffd700; }
+  #player-list .dot { width: 10px; height: 10px; border-radius: 50%;
+                      background: #66ddaa; flex: none; }
   /* ===== Touch controls (mobile/tablet) ===== */
   #touch-controls { display: none; }
   body.touch-mode #touch-controls { display: block; }
@@ -288,9 +300,16 @@
   <div class="row"><span class="label">音效</span><button id="sfx-toggle" type="button" title="切換音效">🔊</button></div>
   <div class="row"><span class="label">音樂</span><button id="bgm-toggle" type="button" title="切換 BGM">🎵</button></div>
   <div class="row"><span class="label">⚡ 加速</span><span class="value" id="buff-speed">—</span></div>
+  <div class="row"><span class="label">🦘 跳高</span><span class="value" id="buff-jump">—</span></div>
+  <div class="row"><span class="label">🧲 磁鐵</span><span class="value" id="buff-magnet">—</span></div>
 </div>
 
 <div id="zone-tag"><span id="storm-indicator" style="display:none; color:#ff6644; font-weight:bold;">⚡ 暴風雨 ⚡ </span>回山頂按 <kbd>B</kbd> 開商店</div>
+
+<div id="player-list">
+  <div class="title">線上玩家</div>
+  <div id="player-list-items"></div>
+</div>
 
 <div id="warn">海 嘯 警 報</div>
 <div id="toast"></div>
@@ -544,10 +563,47 @@ function clearAllCoins(){
   coins.length = 0;
 }
 
+// ----- Death chests (server-tracked when MP, local when not) -----
+const chests = [];   // { id, mesh, x, z, value, slots, collected, attempting, ownerName }
+function makeChestMesh(){
+  return new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 1.0, 1.2),
+    new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0x331100, emissiveIntensity: 0.5 })
+  );
+}
+function addChestFromServer(c){
+  const m = makeChestMesh();
+  m.position.set(c.x, 0.6, c.z);
+  scene.add(m);
+  chests.push({ id: c.id, mesh: m, x: c.x, z: c.z, value: c.value, slots: c.slots,
+                ownerName: c.ownerName || '', collected: false, attempting: false });
+}
+function clearAllChests(){
+  for (const c of chests){ if (c.mesh) scene.remove(c.mesh); }
+  chests.length = 0;
+}
+function scatterSpilloverCoins(cx, cz, count, totalValue){
+  const perCoin = Math.max(1, Math.floor(totalValue / count));
+  let valueLeft = totalValue;
+  for (let i = 0; i < count; i++){
+    const value = (i === count - 1) ? valueLeft : perCoin;
+    valueLeft -= perCoin;
+    const m = new THREE.Mesh(coinGeo, coinMat);
+    const x = cx + (Math.random() - 0.5) * 4;
+    const z = cz + (Math.random() - 0.5) * 4;
+    m.position.set(x, 0.7, z);
+    scene.add(m);
+    coins.push({ id: 'spill_' + Math.random().toString(36).slice(2,8), mesh: m, x, z, value,
+                 collected: false, dropped: false, attempting: false, spillover: true });
+  }
+}
+
 // ----- Power-ups (speed boost, etc) -----
 const powerups = [];
 const POWERUP_VISUALS = {
-  speed: { color: 0xff3333, emissive: 0xff5500 },
+  speed:  { color: 0xff3333, emissive: 0xff5500 },
+  jump:   { color: 0x44dd44, emissive: 0x55ff66 },
+  magnet: { color: 0x44aaff, emissive: 0x6699ff },
 };
 function makePowerupMesh(type){
   const v = POWERUP_VISUALS[type] || POWERUP_VISUALS.speed;
@@ -907,6 +963,8 @@ const state = {
   cameraYaw: 0,                 // orbit angle around player (0 = behind)
   cameraPitch: 0.55,            // elevation angle (0 = horizontal, π/2 = top-down)
   buffSpeedUntil: 0,            // local-time seconds; speed boost active while t < this
+  buffJumpUntil: 0,
+  buffMagnetUntil: 0,
   nextSpawnIn: 4,             // randomized wait until next wave
   coinRefreshAccum: 0,
   lastExitedPit: null,
@@ -920,8 +978,14 @@ function applyBuff(type){
   if (type === 'speed'){
     state.buffSpeedUntil = Math.max(t + 10, state.buffSpeedUntil);
     toast('⚡ 加速 10 秒！');
-    sfx.bigCoin();
+  } else if (type === 'jump'){
+    state.buffJumpUntil = Math.max(t + 5, state.buffJumpUntil);
+    toast('🦘 跳高 5 秒！');
+  } else if (type === 'magnet'){
+    state.buffMagnetUntil = Math.max(t + 5, state.buffMagnetUntil);
+    toast('🧲 磁鐵 5 秒！');
   }
+  sfx.bigCoin();
 }
 
 function applyStats(){
@@ -950,14 +1014,20 @@ const hud = {
   hilltopPrompt: document.getElementById('hilltop-prompt'),
   stormIndicator: document.getElementById('storm-indicator'),
   buffSpeed: document.getElementById('buff-speed'),
+  buffJump: document.getElementById('buff-jump'),
+  buffMagnet: document.getElementById('buff-magnet'),
 };
 
 function updateHUD(){
   hud.money.textContent = state.money;
   hud.bag.textContent = `${state.bag} / ${state.carryMax}`;
   hud.stormIndicator.style.display = state.storm ? 'inline' : 'none';
-  const buffRem = state.buffSpeedUntil - t;
-  hud.buffSpeed.textContent = buffRem > 0 ? `${buffRem.toFixed(1)} 秒` : '—';
+  const fmt = v => v > 0 ? `${v.toFixed(1)} 秒` : '—';
+  hud.buffSpeed.textContent  = fmt(state.buffSpeedUntil - t);
+  hud.buffJump.textContent   = fmt(state.buffJumpUntil - t);
+  hud.buffMagnet.textContent = fmt(state.buffMagnetUntil - t);
+  // Highlight bag in red when it overflows carryMax (after picking a chest)
+  hud.bag.style.color = state.bag > state.carryMax ? '#ff5555' : '';
   const dist = Math.max(0, BASE_Z - player.position.z);
   hud.dist.textContent = `${Math.round(dist)} m`;
   if (dist > state.maxDist) state.maxDist = dist;
@@ -1057,18 +1127,25 @@ function killPlayer(){
   if (!state.alive) return;
   state.alive = false;
   sfx.death();
-  // Drop bag as recoverable golden chest at death position
   if (state.bag > 0){
-    const drop = new THREE.Mesh(
-      new THREE.BoxGeometry(1.0, 1.0, 1.0),
-      new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0x331100 })
-    );
-    drop.position.set(player.position.x, 0.5, player.position.z);
-    scene.add(drop);
-    coins.push({
-      mesh: drop, x: drop.position.x, z: drop.position.z,
-      value: state.bagValue, collected: false, dropped: true
-    });
+    if (mpAuthoritative && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+      // Tell server to spawn a shared chest anyone can grab
+      mpSocket.send(JSON.stringify({
+        type: 'chest_drop',
+        x: player.position.x, z: player.position.z,
+        value: state.bagValue, slots: state.bag,
+      }));
+    } else {
+      // Local fallback: drop a single chest as a coin entry (legacy)
+      const drop = makeChestMesh();
+      drop.position.set(player.position.x, 0.6, player.position.z);
+      scene.add(drop);
+      coins.push({
+        mesh: drop, x: drop.position.x, z: drop.position.z,
+        value: state.bagValue, collected: false, dropped: true,
+        slots: state.bag,
+      });
+    }
     state.bag = 0;
     state.bagValue = 0;
   }
@@ -1138,10 +1215,11 @@ function update(now){
     player.position.x = Math.max(-RUNWAY_HALF_W + 0.6, Math.min(RUNWAY_HALF_W - 0.6, player.position.x));
     player.position.z = Math.min(HILL_END_Z, Math.max(-RUNWAY_LEN + 5, player.position.z));
 
-    // jump
+    // jump (jump-buff multiplies the impulse)
     const floor = groundY(player.position.z);
+    const jumpBuffMul = (t < state.buffJumpUntil) ? 1.5 : 1.0;
     if (keys['Space'] && Math.abs(player.position.y - floor) < 0.05 && !state.inPit){
-      state.vy = state.jump;
+      state.vy = state.jump * jumpBuffMul;
       sfx.jump();
     }
     state.vy -= 0.025;
@@ -1196,11 +1274,14 @@ function update(now){
   // ----- Coin pickup -----
   if (state.alive){
     const lootMul = state.storm ? 2 : 1;
+    const magnetMul = (t < state.buffMagnetUntil) ? 2.5 : 1.0;
+    const pickRad = state.pickupRadius * magnetMul;
+    const pickRadSq = pickRad * pickRad;
     for (const c of coins){
       if (c.collected) continue;
       const dx = player.position.x - c.x;
       const dz = player.position.z - c.z;
-      if (dx*dx + dz*dz < state.pickupRadius * state.pickupRadius){
+      if (dx*dx + dz*dz < pickRadSq){
         if (c.dropped){
           // Death chests are local — server doesn't track per-player drops yet
           if (state.bag < state.carryMax){
@@ -1228,13 +1309,57 @@ function update(now){
     }
   }
 
+  // ----- Death chest pickup (shared, with bag overflow handled) -----
+  if (state.alive){
+    const magnetMulC = (t < state.buffMagnetUntil) ? 2.5 : 1.0;
+    const pickRadC = state.pickupRadius * magnetMulC;
+    const pickRadCSq = pickRadC * pickRadC;
+    for (const c of chests){
+      if (c.collected) continue;
+      const dx = player.position.x - c.x;
+      const dz = player.position.z - c.z;
+      if (dx*dx + dz*dz < pickRadCSq){
+        if (mpAuthoritative){
+          if (!c.attempting && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+            c.attempting = true;
+            mpSocket.send(JSON.stringify({
+              type: 'chest_pickup_attempt', chestId: c.id,
+              currentBag: state.bag, carryMax: state.carryMax,
+            }));
+          }
+        } else {
+          // Local fallback: split here, scatter leftovers as ground coins
+          const space = Math.max(0, state.carryMax - state.bag);
+          const taken = Math.min(c.slots, space);
+          const takenValue = c.slots > 0 ? Math.floor(c.value * taken / c.slots) : 0;
+          if (taken > 0){
+            state.bag += taken;
+            state.bagValue += takenValue;
+            sfx.bigCoin();
+            toast(`找回寶箱 +${taken} 格 (+$${takenValue})`);
+          }
+          const leftSlots = c.slots - taken;
+          const leftValue = c.value - takenValue;
+          c.collected = true;
+          if (c.mesh) scene.remove(c.mesh);
+          if (leftSlots > 0 && leftValue > 0){
+            scatterSpilloverCoins(c.x, c.z, leftSlots, leftValue);
+          }
+        }
+      }
+    }
+  }
+
   // ----- Power-up pickup -----
   if (state.alive){
+    const magnetMulP = (t < state.buffMagnetUntil) ? 2.5 : 1.0;
+    const pickRadP = state.pickupRadius * magnetMulP;
+    const pickRadPSq = pickRadP * pickRadP;
     for (const p of powerups){
       if (p.collected) continue;
       const dx = player.position.x - p.x;
       const dz = player.position.z - p.z;
-      if (dx*dx + dz*dz < state.pickupRadius * state.pickupRadius){
+      if (dx*dx + dz*dz < pickRadPSq){
         if (mpAuthoritative){
           if (!p.attempting && mpSocket && mpSocket.readyState === WebSocket.OPEN){
             p.attempting = true;
@@ -1711,6 +1836,24 @@ function spawnOtherPlayer(p){
     target: { x: p.x ?? 0, y: p.y ?? 0, z: p.z ?? 8, ry: p.ry ?? 0 },
     moving: false, inPit: false,
   });
+  refreshPlayerList();
+}
+
+function refreshPlayerList(){
+  const el = document.getElementById('player-list-items');
+  if (!el) return;
+  const rows = [];
+  // Me first
+  if (state.custom && state.custom.name){
+    rows.push(`<div class="row me"><span class="dot" style="background:#ffd700"></span>${escapeHtml(state.custom.name)}（我）</div>`);
+  }
+  for (const o of otherPlayers.values()){
+    rows.push(`<div class="row"><span class="dot"></span>${escapeHtml(o.name || '???')}</div>`);
+  }
+  el.innerHTML = rows.join('');
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
 function rebuildOtherAvatar(o, p){
@@ -1739,6 +1882,7 @@ function removeOtherPlayer(id){
   if (!o) return;
   scene.remove(o.group);
   otherPlayers.delete(id);
+  refreshPlayerList();
 }
 
 function mpSendIdentify(){
@@ -1792,6 +1936,8 @@ function mpHandleMessage(raw){
       msg.coins.forEach(addCoinFromServer);
       clearAllPowerups();
       (msg.powerups || []).forEach(addPowerupFromServer);
+      clearAllChests();
+      (msg.chests || []).forEach(addChestFromServer);
       for (const ts of tsunamis) scene.remove(ts.obj.group);
       tsunamis.length = 0;
       msg.waves.forEach(addServerWave);
@@ -1825,7 +1971,10 @@ function mpHandleMessage(raw){
   } else if (msg.type === 'identify'){
     if (msg.id === mpMyId) return;
     const o = otherPlayers.get(msg.id);
-    if (o) rebuildOtherAvatar(o, { id: msg.id, name: msg.name, custom: msg.custom });
+    if (o){
+      rebuildOtherAvatar(o, { id: msg.id, name: msg.name, custom: msg.custom });
+      refreshPlayerList();
+    }
   } else if (msg.type === 'wave_spawn'){
     addServerWave(msg.wave);
   } else if (msg.type === 'wave_remove'){
@@ -1866,13 +2015,44 @@ function mpHandleMessage(raw){
       if (p.mesh) scene.remove(p.mesh);
     }
     if (msg.byId === mpMyId) applyBuff(msg.buffType);
+  } else if (msg.type === 'chest_spawn'){
+    addChestFromServer(msg);
+    if (msg.ownerName) toast(`💀 ${msg.ownerName} 死亡，寶箱掉落`);
+  } else if (msg.type === 'chest_picked'){
+    const c = chests.find(x => x.id === msg.id);
+    if (c){
+      c.collected = true;
+      if (c.mesh) scene.remove(c.mesh);
+    }
+    if (msg.byId === mpMyId){
+      const slots = msg.takenSlots ?? msg.slots ?? 0;
+      const value = msg.takenValue ?? msg.value ?? 0;
+      if (slots > 0){
+        state.bag += slots;
+        state.bagValue += value;
+        sfx.bigCoin();
+        toast(`找回寶箱 +${slots} 格 (+$${value})`);
+      }
+    }
+  } else if (msg.type === 'coin_spawn'){
+    // Server spawned a fresh coin (e.g. spillover from a chest pickup)
+    addCoinFromServer(msg.coin);
   } else if (msg.type === 'powerup_respawn'){
     const p = powerups.find(x => x.id === msg.id);
-    if (p && p.mesh){
+    if (p){
       p.collected = false;
       p.attempting = false;
-      p.mesh.position.set(p.x, 1.0, p.z);
-      scene.add(p.mesh);
+      // Type may change on respawn — rebuild mesh
+      if (msg.ptype && msg.ptype !== p.type){
+        p.type = msg.ptype;
+        if (p.mesh) scene.remove(p.mesh);
+        p.mesh = makePowerupMesh(p.type);
+        p.mesh.position.set(p.x, 1.0, p.z);
+      }
+      if (p.mesh){
+        p.mesh.position.set(p.x, 1.0, p.z);
+        scene.add(p.mesh);
+      }
     }
   } else if (msg.type === 'storm_start'){
     state.storm = true;
@@ -2032,6 +2212,7 @@ document.getElementById('start-game').addEventListener('click', () => {
   state.custom.name = name;
   localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
   buildPlayer(state.custom);
+  refreshPlayerList();
   hide('creator-screen');
   if (localStorage.getItem('etfm-tutorial') === 'yes'){
     state.gamePhase = 'playing';

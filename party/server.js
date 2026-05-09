@@ -49,20 +49,24 @@ export default class WorldServer {
     this.spawnInitialCoins();
     this.powerups = [];
     this.spawnInitialPowerups();
+    // Death chests dropped on player death (shared — any player can grab)
+    this.chests = [];
+    this.nextChestId = 1;
     this.lastTick = Date.now();
     this.tickHandle = setInterval(() => this.tick(), 50);
   }
 
   spawnInitialPowerups(){
     let id = 1;
+    const TYPES = ['speed', 'jump', 'magnet'];
     for (let zone = 0; zone < NUM_ZONES; zone++){
       const zStart = -zone * ZONE_LEN - 30;
       const zEnd   = -(zone + 1) * ZONE_LEN + 20;
-      const count  = 1 + (zone >= 2 ? 1 : 0);   // 1 in zones 0-1, 2 in zones 2-4
+      const count  = 1 + (zone >= 2 ? 1 : 0);
       for (let i = 0; i < count; i++){
         this.powerups.push({
           id: id++,
-          type: 'speed',
+          type: TYPES[Math.floor(Math.random() * TYPES.length)],
           x: (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 3),
           z: zStart - Math.random() * (zStart - zEnd),
           available: true,
@@ -105,12 +109,14 @@ export default class WorldServer {
         this.broadcast({ type: 'coin_respawn', id: c.id });
       }
     }
-    // Powerup respawn
+    // Powerup respawn (re-randomize type each respawn so distribution mixes)
     for (const p of this.powerups){
       if (!p.available && p.respawnAt && now >= p.respawnAt){
+        const TYPES = ['speed', 'jump', 'magnet'];
+        p.type = TYPES[Math.floor(Math.random() * TYPES.length)];
         p.available = true;
         p.respawnAt = 0;
-        this.broadcast({ type: 'powerup_respawn', id: p.id });
+        this.broadcast({ type: 'powerup_respawn', id: p.id, ptype: p.type });
       }
     }
 
@@ -208,6 +214,9 @@ export default class WorldServer {
       powerups: this.powerups.filter(p => p.available).map(p => ({
         id: p.id, x: p.x, z: p.z, type: p.type,
       })),
+      chests: this.chests.filter(c => c.available).map(c => ({
+        id: c.id, x: c.x, z: c.z, value: c.value, slots: c.slots,
+      })),
       waves: this.waves,
       storm: this.storm,
     }));
@@ -247,7 +256,8 @@ export default class WorldServer {
       const coin = this.coins.find(c => c.id === msg.coinId);
       if (coin && coin.available){
         coin.available = false;
-        coin.respawnAt = Date.now() + COIN_RESPAWN_MS;
+        // Spillover coins don't respawn — they're one-shot drops from chests
+        if (!coin.spillover) coin.respawnAt = Date.now() + COIN_RESPAWN_MS;
         this.broadcast({
           type: 'coin_pickup',
           id: coin.id,
@@ -255,6 +265,10 @@ export default class WorldServer {
           byName: player.name,
           value: coin.value,
         });
+        if (coin.spillover){
+          // Remove entirely so it never comes back
+          this.coins = this.coins.filter(c => c.id !== coin.id);
+        }
       }
     } else if (msg.type === 'powerup_attempt'){
       const p = this.powerups.find(x => x.id === msg.powerupId);
@@ -269,6 +283,66 @@ export default class WorldServer {
           byName: player.name,
         });
       }
+    } else if (msg.type === 'chest_drop'){
+      const value = +msg.value || 0;
+      const slots = +msg.slots || 0;
+      if (value <= 0 || slots <= 0) return;
+      const chest = {
+        id: 'chest_' + (this.nextChestId++),
+        x: +msg.x || 0,
+        z: +msg.z || 0,
+        value, slots,
+        ownerName: player.name,
+        available: true,
+      };
+      this.chests.push(chest);
+      this.broadcast({
+        type: 'chest_spawn',
+        id: chest.id, x: chest.x, z: chest.z,
+        value, slots, ownerName: chest.ownerName,
+      });
+    } else if (msg.type === 'chest_pickup_attempt'){
+      const c = this.chests.find(x => x.id === msg.chestId);
+      if (!c || !c.available) return;
+      c.available = false;
+      const carryMax   = +msg.carryMax || 10;
+      const currentBag = +msg.currentBag || 0;
+      const space = Math.max(0, carryMax - currentBag);
+      const takenSlots  = Math.min(c.slots, space);
+      const takenValue  = c.slots > 0 ? Math.floor(c.value * takenSlots / c.slots) : 0;
+      const leftSlots   = c.slots - takenSlots;
+      const leftValue   = c.value - takenValue;
+      this.broadcast({
+        type: 'chest_picked',
+        id: c.id,
+        byId: sender.id, byName: player.name,
+        takenSlots, takenValue,
+        x: c.x, z: c.z,
+      });
+      // Excess scatters as ground coins (spillover, no respawn)
+      if (leftSlots > 0 && leftValue > 0){
+        const perCoin = Math.max(1, Math.floor(leftValue / leftSlots));
+        let remaining = leftValue;
+        for (let i = 0; i < leftSlots; i++){
+          const value = (i === leftSlots - 1) ? remaining : perCoin;
+          remaining -= perCoin;
+          const coin = {
+            id: 'spill_' + sender.id.slice(0,4) + '_' + (this.nextChestId++),
+            x: c.x + (Math.random() - 0.5) * 4,
+            z: c.z + (Math.random() - 0.5) * 4,
+            value,
+            available: true,
+            respawnAt: 0,
+            spillover: true,
+          };
+          this.coins.push(coin);
+          this.broadcast({
+            type: 'coin_spawn',
+            coin: { id: coin.id, x: coin.x, z: coin.z, value: coin.value },
+          });
+        }
+      }
+      this.chests = this.chests.filter(x => x.id !== c.id);
     } else if (msg.type === 'chat'){
       const text = String(msg.text || '').slice(0, 120);
       if (!text) return;
