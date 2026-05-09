@@ -473,12 +473,8 @@ const TSUNAMI_STOP_Z = HILL_START_Z;
 const WAVE_APPROACH_SEC = 10;
 const WAVE_MIN_SPEED = 0.30;
 
-function groundY(z){
-  if (z <= HILL_START_Z) return 0;
-  if (z >= HILL_END_Z) return HILL_PEAK;
-  const stepIdx = Math.floor((z - HILL_START_Z) / HILL_STEP_LEN);
-  return (stepIdx + 1) * HILL_STEP_RISE;
-}
+// Hill removed — base is now a flat plaza you can walk through directly
+function groundY(z){ return 0; }
 // Floor height taking pits into account (returns -depth if standing over an
 // accessible pit). pits[] is populated below in spawnPits() — this function
 // runs only inside the game loop, by which time pits are ready.
@@ -569,8 +565,8 @@ scene.add(ground);
   scene.add(grass);
 });
 
-// Mountain chain along sides — push out beyond the wider runway
-for (let z = 10; z > -RUNWAY_LEN; z -= 26){
+// Mountain chain along sides — start past the plaza so they don't poke into base view
+for (let z = -16; z > -RUNWAY_LEN; z -= 26){
   const hL = 8 + Math.random() * 8;
   const hR = 8 + Math.random() * 8;
   const ml = mk(22, hL, 24, 0x6B4423);
@@ -603,32 +599,43 @@ const safetyLine = mkPlane(RUNWAY_HALF_W*2, 0.6, 0xff3333);
 safetyLine.position.set(0, 0.05, SAFETY_LINE_Z);
 scene.add(safetyLine);
 
-// Hill behind safety line — stepped voxel hill rising to base
-for (let i = 0; i < HILL_STEPS; i++){
-  const zCenter = HILL_START_Z + (i + 0.5) * HILL_STEP_LEN;
-  const h = (i + 1) * HILL_STEP_RISE;
-  const tone = i % 2 === 0 ? 0xc9a96a : 0xb89858;
-  const step = mk(RUNWAY_HALF_W*2, h, HILL_STEP_LEN, tone);
-  step.position.set(0, h/2, zCenter);
-  scene.add(step);
+// Plaza (replaces the old stepped hill — wider, flat, walk-through base)
+const PLAZA_HALF_W = 50;
+const PLAZA_Z_START = 4;
+const PLAZA_Z_END   = 24;
+const PLAZA_CENTER_Z = (PLAZA_Z_START + PLAZA_Z_END) / 2;
+const plaza = mkPlane(PLAZA_HALF_W * 2, PLAZA_Z_END - PLAZA_Z_START, 0x8B5A2B);
+plaza.position.set(0, 0.008, PLAZA_CENTER_Z);
+scene.add(plaza);
+// Plank lines for texture
+for (let z = PLAZA_Z_START + 0.6; z < PLAZA_Z_END; z += 1.6){
+  const plank = mkPlane(PLAZA_HALF_W * 2, 0.10, 0x5a3a1a);
+  plank.position.set(0, 0.013, z);
+  scene.add(plank);
 }
-// Markers at hill peak (placed solidly on top step, z=17)
-const PEAK_Z = HILL_END_Z - HILL_STEP_LEN/2;  // 17
-const pole = mk(0.2, 3, 0.2, 0x3a2a1a);
-pole.position.set(-RUNWAY_HALF_W + 1, HILL_PEAK + 1.5, PEAK_Z);
+// Side trim
+[-1, 1].forEach(side => {
+  const trim = mkPlane(0.6, PLAZA_Z_END - PLAZA_Z_START, 0x3a2a1a);
+  trim.position.set(side * PLAZA_HALF_W, 0.014, PLAZA_CENTER_Z);
+  scene.add(trim);
+});
+// Markers at plaza level (y measured from flat ground)
+const PEAK_Z = PLAZA_CENTER_Z;  // 14
+const pole = mk(0.25, 5, 0.25, 0x3a2a1a);
+pole.position.set(-30, 2.5, PEAK_Z);
 scene.add(pole);
-const flag = mk(2, 1.2, 0.1, 0xaa4040);
-flag.position.set(-RUNWAY_HALF_W + 2.2, HILL_PEAK + 2.5, PEAK_Z);
+const flag = mk(3, 1.8, 0.12, 0xaa4040);
+flag.position.set(-28.5, 4.4, PEAK_Z);
 scene.add(flag);
-const shopPole = mk(0.15, 2.4, 0.15, 0x3a2a1a);
-shopPole.position.set(RUNWAY_HALF_W - 1.5, HILL_PEAK + 1.2, PEAK_Z);
+const shopPole = mk(0.22, 3.8, 0.22, 0x3a2a1a);
+shopPole.position.set(30, 1.9, PEAK_Z);
 scene.add(shopPole);
-const shopSign = mk(1.6, 0.9, 0.1, 0xffd700);
-shopSign.position.set(RUNWAY_HALF_W - 1.5, HILL_PEAK + 2.6, PEAK_Z);
+const shopSign = mk(2.4, 1.4, 0.12, 0xffd700);
+shopSign.position.set(30, 4.0, PEAK_Z);
 scene.add(shopSign);
-// "BASE" deposit beacon — pulsing column on top step so player knows where to deposit
-const beacon = mk(0.4, 0.3, 0.4, 0xffdd00);
-beacon.position.set(0, HILL_PEAK + 0.2, PEAK_Z);
+// Deposit beacon — pulsing column at plaza centre
+const beacon = mk(0.6, 0.4, 0.6, 0xffdd00);
+beacon.position.set(0, 0.25, PEAK_Z);
 scene.add(beacon);
 
 // ============================================================
@@ -1602,7 +1609,9 @@ function toast(text){
 // ============================================================
 let shopOpen = false;
 function inBase(){
-  return player.position.z >= BASE_TOP_Z;  // top step only
+  // Anywhere within the plaza counts as base now (flat ground, no climbing)
+  const z = player.position.z;
+  return z >= SAFETY_LINE_Z + 2 && z <= 25;
 }
 function upgradeCost(def, lv){
   return Math.round(def.baseCost * Math.pow(1.6, lv));
