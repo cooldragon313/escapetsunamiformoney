@@ -155,9 +155,15 @@ npm run dev
 - 金幣搶先撿（race condition）
 - 基地交易、聊天
 
+## 音效 / BGM
+
+- 所有遊戲音效（跳、撿錢、進坑、警報、暴風雨等）都會自動播放
+- 預設用 Web Audio API 合成（不用下載任何檔案）
+- 想要真實音效或加 BGM：詳見 [`assets/sfx/README.md`](assets/sfx/README.md)
+- HUD 音效列「🔊」按鈕可隨時開關，偏好存 localStorage
+
 ## 路線圖（未做）
 
-- Phase 1B：海嘯與金幣移到 server，所有玩家共享
 - 基地分區擴建（商店區 / 自家空地 / 廣場）
 - 道具收集 + 建造系統（被動賺錢建築）
-- 音效 / BGM
+- 死亡寶箱共享（讓搶奪別人死亡掉落變可能）

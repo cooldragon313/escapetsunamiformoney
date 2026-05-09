@@ -14,6 +14,10 @@
   #hud .label { color:#888; }
   #hud .value { color:#fff; font-weight: bold; }
   #hud .gold  { color: #ffd700; }
+  #audio-toggle { background: none; border: none; cursor: pointer;
+                  color: white; font-size: 16px; padding: 0;
+                  font-family: monospace; line-height: 1; }
+  #audio-toggle.muted { opacity: 0.4; }
   #zone-tag { position: fixed; top: 12px; right: 12px; padding: 8px 14px;
               background: rgba(0,0,0,0.55); border: 2px solid #444; font-size: 14px; }
   #warn { position: fixed; top: 26%; left: 50%; transform: translate(-50%, -50%);
@@ -280,6 +284,7 @@
   <div class="row"><span class="label">區域</span><span class="value" id="zone">基地</span></div>
   <div class="row"><span class="label">距離</span><span class="value" id="dist">0 m</span></div>
   <div class="row"><span class="label">最遠</span><span class="value" id="max-dist">0 m</span></div>
+  <div class="row"><span class="label">音效</span><button id="audio-toggle" type="button" title="切換音效">🔊</button></div>
 </div>
 
 <div id="zone-tag"><span id="storm-indicator" style="display:none; color:#ff6644; font-weight:bold;">⚡ 暴風雨 ⚡ </span>回山頂按 <kbd>B</kbd> 開商店</div>
@@ -864,6 +869,7 @@ function updateHUD(){
 
 let warnTimer = null;
 function showWarn(waveType){
+  sfx.warn();
   let label, color;
   if (waveType.lethal === 'fullscreen') { label = `${waveType.name}！必躲坑！`; color = '#ff8800'; }
   else if (waveType.lethal === 'jumpable') { label = `${waveType.name}（可跳過）`; color = '#88ff66'; }
@@ -925,6 +931,7 @@ function renderShop(){
         renderShop();
         updateHUD();
         saveProgress();
+        sfx.buy();
       }
     });
   });
@@ -947,6 +954,7 @@ let deathTimer = null;
 function killPlayer(){
   if (!state.alive) return;
   state.alive = false;
+  sfx.death();
   // Drop bag as recoverable golden chest at death position
   if (state.bag > 0){
     const drop = new THREE.Mesh(
@@ -972,6 +980,7 @@ function killPlayer(){
     state.alive = true;
     hud.death.classList.remove('show');
     updateHUD();
+    sfx.respawn();
   }, 1500);
 }
 
@@ -1024,10 +1033,14 @@ function update(now){
     const floor = groundY(player.position.z);
     if (keys['Space'] && Math.abs(player.position.y - floor) < 0.05 && !state.inPit){
       state.vy = state.jump;
+      sfx.jump();
     }
     state.vy -= 0.025;
     player.position.y += state.vy * 60 * dt;
-    if (player.position.y < floor){ player.position.y = floor; state.vy = 0; }
+    if (player.position.y < floor){
+      if (state.vy < -0.15) sfx.land();
+      player.position.y = floor; state.vy = 0;
+    }
   }
 
   // ----- Pit gate (jump level must be high enough to use deep pits) -----
@@ -1041,12 +1054,14 @@ function update(now){
           if (performance.now() - (state.lastBlockedPitToast ?? 0) > 1800){
             toast(`此坑需要跳高 Lv ${p.jumpReq}（目前 Lv ${state.upgrades.jump}）`);
             state.lastBlockedPitToast = performance.now();
+            sfx.blocked();
           }
         } else {
           state.inPit = p;
           state.pitUntil = performance.now() + 3000;
           player.position.y = -1.4;
           toast('躲進坑');
+          sfx.pitEnter();
         }
         break;
       }
@@ -1065,6 +1080,7 @@ function update(now){
       state.inPit = null;
       player.position.y = groundY(player.position.z);
       toast('爬出坑洞');
+      sfx.climbOut();
     }
   }
 
@@ -1084,6 +1100,7 @@ function update(now){
             c.collected = true;
             scene.remove(c.mesh);
             toast(`找回死亡寶藏 +$${c.value}（帶回山頂存款）`);
+            sfx.bigCoin();
           }
         } else if (MP_ENABLED){
           // Race for coin via server; bag credit happens on coin_pickup confirmation
@@ -1096,6 +1113,7 @@ function update(now){
           state.bagValue += c.value * lootMul;
           c.collected = true;
           scene.remove(c.mesh);
+          sfx.coin();
         }
       }
     }
@@ -1111,7 +1129,11 @@ function update(now){
     state.bag = 0;
     state.bagValue = 0;
     saveProgress();
+    sfx.deposit();
   }
+  // ----- Sound when first entering hilltop area -----
+  if (state.alive && inBase() && !state._wasInBase){ sfx.baseEnter(); state._wasInBase = true; }
+  if (!inBase()) state._wasInBase = false;
 
   // ----- Hilltop spend prompt -----
   if (state.alive && inBase() && state.money > 0 && !shopOpen){
@@ -1148,6 +1170,7 @@ function update(now){
       scene.background = new THREE.Color(0x4a3030);
       scene.fog.color.setHex(0x4a3030);
       toast('⚡ 暴風雨來臨！海浪頻繁、寶藏倍增 ⚡');
+      sfx.stormStart();
     }
     if (state.storm && t > state.stormUntil){
       state.storm = false;
@@ -1155,6 +1178,7 @@ function update(now){
       scene.background = new THREE.Color(0x87ceeb);
       scene.fog.color.setHex(0x87ceeb);
       toast('海面恢復平靜');
+      sfx.stormEnd();
     }
 
     state.spawnAccum += dt;
@@ -1304,6 +1328,157 @@ updateHUD();
 
 // Save on tab close / refresh as a safety net
 window.addEventListener('beforeunload', saveProgress);
+
+// ============================================================
+// AUDIO — Web Audio synth for snappy effects + optional file overrides
+// ============================================================
+const audioPrefs = {
+  enabled: localStorage.getItem('etfm-audio') !== 'off',
+  volume: parseFloat(localStorage.getItem('etfm-audio-vol') || '0.6'),
+};
+let audioCtx = null;
+function getAudioCtx(){
+  if (!audioCtx){
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+// Optional file overrides — drop matching files into assets/sfx/
+const SFX_FILES = {
+  warn:    'assets/sfx/warn.mp3',
+  death:   'assets/sfx/death.mp3',
+  deposit: 'assets/sfx/deposit.mp3',
+  storm:   'assets/sfx/storm.mp3',
+};
+const sfxFile = {};
+for (const [name, path] of Object.entries(SFX_FILES)){
+  const a = new Audio();
+  a.preload = 'auto';
+  a.src = path;
+  a.addEventListener('canplaythrough', () => { sfxFile[name] = a; }, { once: true });
+  a.addEventListener('error',          () => { sfxFile[name] = null; }, { once: true });
+}
+function playFile(name, volume){
+  const a = sfxFile[name];
+  if (!a || !audioPrefs.enabled) return false;
+  const c = a.cloneNode();
+  c.volume = (volume ?? 1) * audioPrefs.volume;
+  c.play().catch(() => {});
+  return true;
+}
+// --- Synth primitives ---
+function tone(opts){
+  if (!audioPrefs.enabled) return;
+  const ctx = getAudioCtx(); if (!ctx) return;
+  const { freq = 880, type = 'sine', duration = 0.12, volume = 0.3,
+          attack = 0.005, freqEnd = null, delay = 0 } = opts;
+  const t0 = ctx.currentTime + delay;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (freqEnd != null) osc.frequency.exponentialRampToValueAtTime(Math.max(20, freqEnd), t0 + duration);
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(volume * audioPrefs.volume, t0 + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.02);
+}
+function noiseBurst(opts){
+  if (!audioPrefs.enabled) return;
+  const ctx = getAudioCtx(); if (!ctx) return;
+  const { duration = 0.2, volume = 0.2, lowpass = null, attack = 0.005, delay = 0 } = opts;
+  const t0 = ctx.currentTime + delay;
+  const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * duration)), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(volume * audioPrefs.volume, t0 + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+  let last = src;
+  if (lowpass){
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = lowpass;
+    src.connect(lp); last = lp;
+  }
+  last.connect(gain).connect(ctx.destination);
+  src.start(t0); src.stop(t0 + duration + 0.02);
+}
+// --- Specific effects ---
+const sfx = {
+  coin:       () => { tone({freq:1760, type:'square', duration:0.06, volume:0.16});
+                      tone({freq:2640, type:'square', duration:0.10, volume:0.16, delay:0.04}); },
+  bigCoin:    () => { tone({freq: 880, type:'triangle', duration:0.10, volume:0.22});
+                      tone({freq:1320, type:'triangle', duration:0.10, volume:0.22, delay:0.07});
+                      tone({freq:1760, type:'triangle', duration:0.18, volume:0.22, delay:0.14}); },
+  jump:       () => tone({freq:220, freqEnd:660, type:'triangle', duration:0.18, volume:0.18}),
+  land:       () => tone({freq: 80, freqEnd: 60, type:'sine',     duration:0.08, volume:0.18}),
+  pitEnter:   () => { tone({freq:380, freqEnd: 90, type:'sine', duration:0.25, volume:0.22});
+                      noiseBurst({duration:0.15, volume:0.12, lowpass:400, delay:0.1}); },
+  climbOut:   () => tone({freq:220, freqEnd:520, type:'triangle', duration:0.22, volume:0.18}),
+  blocked:    () => { tone({freq:200, freqEnd:80, type:'square', duration:0.10, volume:0.18});
+                      tone({freq:200, freqEnd:80, type:'square', duration:0.10, volume:0.18, delay:0.12}); },
+  warn:       () => { if (playFile('warn', 0.55)) return;
+                      for (let i = 0; i < 3; i++) tone({freq:1200, type:'square', duration:0.12, volume:0.18, delay:i*0.18}); },
+  death:      () => { if (playFile('death', 0.7)) return;
+                      noiseBurst({duration:0.5, volume:0.30, lowpass:800});
+                      tone({freq:220, freqEnd:60, type:'sawtooth', duration:0.5, volume:0.18}); },
+  respawn:    () => { tone({freq:523, type:'triangle', duration:0.10, volume:0.18});
+                      tone({freq:659, type:'triangle', duration:0.10, volume:0.18, delay:0.10});
+                      tone({freq:784, type:'triangle', duration:0.16, volume:0.20, delay:0.20}); },
+  deposit:    () => { if (playFile('deposit', 0.7)) return;
+                      for (let i = 0; i < 8; i++)
+                        tone({freq:1320 + Math.random()*880, type:'square', duration:0.05, volume:0.12,
+                              delay:i*0.05 + Math.random()*0.04}); },
+  buy:        () => { tone({freq: 880, type:'triangle', duration:0.10, volume:0.20});
+                      tone({freq:1320, type:'triangle', duration:0.16, volume:0.20, delay:0.10}); },
+  stormStart: () => { if (playFile('storm', 0.7)) return;
+                      noiseBurst({duration:1.2, volume:0.30, lowpass:200});
+                      tone({freq:70, freqEnd:50, type:'sawtooth', duration:1.0, volume:0.20, delay:0.05}); },
+  stormEnd:   () => noiseBurst({duration:0.8, volume:0.15, lowpass:600}),
+  baseEnter:  () => tone({freq:880, type:'triangle', duration:0.10, volume:0.14}),
+};
+
+// --- BGM (optional file at assets/bgm.mp3) ---
+const bgm = new Audio();
+bgm.loop = true;
+bgm.preload = 'auto';
+bgm.src = 'assets/bgm.mp3';
+let bgmLoaded = false, bgmPlaying = false;
+bgm.addEventListener('canplaythrough', () => { bgmLoaded = true; }, { once: true });
+bgm.addEventListener('error', () => { bgmLoaded = false; }, { once: true });
+function startBgm(){
+  if (!bgmLoaded || !audioPrefs.enabled || bgmPlaying) return;
+  bgm.volume = 0.25 * audioPrefs.volume;
+  bgm.play().then(() => { bgmPlaying = true; }).catch(() => {});
+}
+function refreshAudioVolumes(){
+  if (bgmPlaying){
+    if (audioPrefs.enabled) bgm.volume = 0.25 * audioPrefs.volume;
+    else { bgm.pause(); bgmPlaying = false; }
+  }
+}
+
+// --- Mute toggle UI ---
+(function(){
+  const btn = document.getElementById('audio-toggle');
+  function render(){
+    btn.textContent = audioPrefs.enabled ? '🔊' : '🔇';
+    btn.classList.toggle('muted', !audioPrefs.enabled);
+  }
+  btn.addEventListener('click', () => {
+    audioPrefs.enabled = !audioPrefs.enabled;
+    localStorage.setItem('etfm-audio', audioPrefs.enabled ? 'on' : 'off');
+    refreshAudioVolumes();
+    if (audioPrefs.enabled) startBgm();
+    render();
+  });
+  render();
+})();
 
 // ============================================================
 // MULTIPLAYER (PartyKit)
@@ -1470,6 +1645,7 @@ function mpHandleMessage(raw){
       const lootMul = state.storm ? 2 : 1;
       state.bag += 1;
       state.bagValue += (msg.value ?? c.value) * lootMul;
+      sfx.coin();
     } else if (msg.byName){
       // brief feedback so the other player isn't invisible
       // (only when they grab one near you — skipped here to avoid toast spam)
@@ -1489,11 +1665,13 @@ function mpHandleMessage(raw){
     scene.background = new THREE.Color(0x4a3030);
     scene.fog.color.setHex(0x4a3030);
     toast('⚡ 暴風雨來臨！海浪頻繁、寶藏倍增 ⚡');
+    sfx.stormStart();
   } else if (msg.type === 'storm_end'){
     state.storm = false;
     scene.background = new THREE.Color(0x87ceeb);
     scene.fog.color.setHex(0x87ceeb);
     toast('海面恢復平靜');
+    sfx.stormEnd();
   }
 }
 
@@ -1626,6 +1804,8 @@ document.querySelectorAll('.swatches').forEach(group => {
 
 // --- Title -> Creator ---
 document.getElementById('title-continue').addEventListener('click', () => {
+  getAudioCtx();        // unlock audio context (needs user gesture)
+  startBgm();           // attempt to start BGM if assets/bgm.mp3 exists
   hide('title-screen');
   show('creator-screen');
   state.gamePhase = 'creator';
