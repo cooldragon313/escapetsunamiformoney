@@ -75,6 +75,7 @@ export default class WorldServer {
             z: 28 + row * 18,
             ownerId: null,
             ownerName: '',
+            build: { floor:'', walls:'', roof:'', furniture:'', decoration:'' },
           });
         }
       }
@@ -258,7 +259,7 @@ export default class WorldServer {
         x: this.bigTreasure.x, z: this.bigTreasure.z, value: this.bigTreasure.value,
       } : null,
       plots: this.plots.map(p => ({
-        id: p.id, ownerId: p.ownerId, ownerName: p.ownerName,
+        id: p.id, ownerId: p.ownerId, ownerName: p.ownerName, build: p.build,
       })),
       waves: this.waves,
       storm: this.storm,
@@ -349,11 +350,25 @@ export default class WorldServer {
       if (!plot || plot.ownerId) return;
       plot.ownerId = sender.id;
       plot.ownerName = player.name;
+      plot.build = { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
       this.broadcast({
         type: 'plot_owned',
         plotId: plot.id,
         ownerId: sender.id,
         ownerName: player.name,
+      });
+    } else if (msg.type === 'plot_build'){
+      const plot = this.plots.find(p => p.id === msg.plotId);
+      if (!plot || plot.ownerId !== sender.id) return;
+      const slot = msg.slot;
+      if (!['floor','walls','roof','furniture','decoration'].includes(slot)) return;
+      plot.build[slot] = String(msg.itemId || '').slice(0, 32);
+      this.broadcast({
+        type: 'plot_built',
+        plotId: plot.id,
+        slot,
+        itemId: plot.build[slot],
+        byId: sender.id,
       });
     } else if (msg.type === 'big_treasure_attempt'){
       if (this.bigTreasure.available){

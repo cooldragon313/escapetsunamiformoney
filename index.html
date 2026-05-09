@@ -53,6 +53,30 @@
   .upgrade button:hover:not(:disabled) { background:#3a5a9a; }
   .upgrade button:disabled { background:#333; color:#666; cursor:not-allowed; border-color:#555; }
   #shop .hint { margin-top: 12px; font-size: 12px; color:#888; text-align:center; }
+  #build-shop { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+                background: rgba(20,40,30,0.96); border: 3px solid #88ccaa;
+                padding: 22px 28px; min-width: 480px; max-width: 90vw;
+                max-height: 88vh; overflow-y: auto;
+                display:none; box-shadow: 0 0 32px #000; z-index: 1500; }
+  #build-shop.show { display:block; }
+  #build-shop h3 { margin: 0 0 14px; text-align:center; color:#88ffcc; font-size: 20px; letter-spacing: 4px; }
+  #build-shop .money-bar { text-align:center; color:#ffd700; margin-bottom: 12px; font-size: 14px; }
+  #b-tabs { display:flex; gap: 6px; margin-bottom: 12px; justify-content: center; }
+  #b-tabs button { background: #2a4a3a; color:#fff; border: 1px solid #88ccaa;
+                   padding: 6px 14px; cursor: pointer; font-family: monospace; font-size: 13px; }
+  #b-tabs button.active { background:#3a7a5a; border-color:#88ffcc; }
+  #b-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .b-item { background: rgba(0,0,0,0.3); border: 1px solid #555; padding: 8px;
+            display:flex; flex-direction: column; gap: 6px; }
+  .b-item .name { font-size: 13px; color:#fff; font-weight: bold; }
+  .b-item .cost { color: #ddd; font-size: 12px; }
+  .b-item .cost .ok { color: #88ffaa; }
+  .b-item .cost .bad { color: #ff7766; }
+  .b-item button { background: #2a6a4a; color: #fff; border: 1px solid #88ffcc;
+                   padding: 5px 10px; cursor: pointer; font-family: monospace; font-size: 12px; }
+  .b-item button:hover:not(:disabled) { background: #3a8a5a; }
+  .b-item button:disabled { background:#333; color:#666; border-color:#555; cursor:not-allowed; }
+  .b-item.equipped { border-color: #88ffcc; box-shadow: 0 0 8px rgba(136,255,204,0.4); }
   #cos-shop { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
               background: rgba(20,30,50,0.96); border: 3px solid #88c0ff;
               padding: 22px 28px; min-width: 480px; max-width: 90vw;
@@ -388,6 +412,20 @@
   <div class="hint">按 <kbd>B</kbd> 或 <kbd>Esc</kbd> 關閉</div>
 </div>
 
+<div id="build-shop">
+  <h3>🏗 建 造 你 的 家 🏗</h3>
+  <div class="money-bar">$<span id="b-money">0</span> · 🪵<span id="b-wood">0</span> · 🪨<span id="b-stone">0</span> · ⚙️<span id="b-iron">0</span></div>
+  <div id="b-tabs">
+    <button data-cat="floor" class="active">地板</button>
+    <button data-cat="walls">牆</button>
+    <button data-cat="roof">屋頂</button>
+    <button data-cat="furniture">家具</button>
+    <button data-cat="decoration">裝飾</button>
+  </div>
+  <div id="b-list"></div>
+  <div class="hint">在自己的地塊上按 <kbd>H</kbd> 開啟 / <kbd>Esc</kbd> 關閉<br>每個槽位只能裝一件，買新的會覆蓋舊的</div>
+</div>
+
 <div id="cos-shop">
   <h3>✨ 造 型 店 ✨</h3>
   <div class="money-bar">持有金錢：$<span id="cos-money">0</span></div>
@@ -415,7 +453,7 @@
   <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 左右 ·
   <kbd>Space</kbd> 跳躍 ·
   <kbd>Shift</kbd> 衝刺 ·
-  <kbd>B</kbd> 升級商店 / <kbd>C</kbd> 造型店（山頂）/ <kbd>P</kbd> 購買地塊（後院）·
+  <kbd>B</kbd> 升級店 / <kbd>C</kbd> 造型店 / <kbd>P</kbd> 買地 / <kbd>H</kbd> 蓋房子 ·
   <kbd>右鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
   跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
   <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
@@ -676,6 +714,115 @@ PLOTS.forEach(p => {
   p.tile = tile;
 });
 
+// ============================================================
+// BUILD ITEMS — modular pieces players assemble on their plots
+// (Phase 1: 1 floor + 1 walls + 1 roof + 1 furniture + 1 decoration per plot)
+// ============================================================
+function _floorBuild(color, lineColor, lineSpacing){
+  const g = new THREE.Group();
+  const f = mkPlane(11.6, 11.6, color); f.position.y = 0.02; g.add(f);
+  for (let z = -5; z <= 5; z += (lineSpacing || 1.5)){
+    const l = mkPlane(11.6, 0.06, lineColor); l.position.set(0, 0.025, z); g.add(l);
+  }
+  return g;
+}
+function _wallsBuild(color){
+  const g = new THREE.Group();
+  const H = 4, T = 0.4, S = 12;
+  const fL = mk(4.5, H, T, color); fL.position.set(-3.5, H/2, -S/2); g.add(fL);
+  const fR = mk(4.5, H, T, color); fR.position.set( 3.5, H/2, -S/2); g.add(fR);
+  const dh = mk(3, 0.5, T, color); dh.position.set(0, H - 0.25, -S/2); g.add(dh);   // door header
+  const back  = mk(S,  H, T, color); back.position.set( 0, H/2, S/2); g.add(back);
+  const left  = mk(T,  H, S, color); left.position.set(-S/2, H/2, 0); g.add(left);
+  const right = mk(T,  H, S, color); right.position.set( S/2, H/2, 0); g.add(right);
+  return g;
+}
+function _roofFlat(color){
+  const g = new THREE.Group();
+  const r = mk(12.4, 0.3, 12.4, color); r.position.y = 4.15; g.add(r);
+  return g;
+}
+function _roofPitched(color){
+  const g = new THREE.Group();
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(8.8, 3.5, 4),
+    new THREE.MeshLambertMaterial({color}));
+  cone.rotation.y = Math.PI / 4; cone.position.y = 5.65; g.add(cone);
+  return g;
+}
+const BUILD_ITEMS = {
+  floor: [
+    { id:'wood',  name:'木板地', price:80,  mats:{wood:5},  build: () => _floorBuild(0x8B5A2B, 0x5a3a1a, 1.5) },
+    { id:'stone', name:'石磚地', price:200, mats:{stone:8}, build: () => _floorBuild(0x999999, 0x666666, 2.0) },
+    { id:'sand',  name:'沙地',   price:50,  mats:{},        build: () => _floorBuild(0xc9a96a, 0xa68855, 3.0) },
+  ],
+  walls: [
+    { id:'wood',  name:'木牆', price:300,  mats:{wood:15},  build: () => _wallsBuild(0x8B5A2B) },
+    { id:'stone', name:'石牆', price:600,  mats:{stone:15}, build: () => _wallsBuild(0x888888) },
+    { id:'iron',  name:'鐵牆', price:1200, mats:{iron:10},  build: () => _wallsBuild(0xbbbbcc) },
+  ],
+  roof: [
+    { id:'flat',    name:'平頂',     price:200, mats:{wood:8},  build: () => _roofFlat(0x6a5a4a) },
+    { id:'pitched', name:'斜頂(紅瓦)', price:400, mats:{stone:8}, build: () => _roofPitched(0x8B0000) },
+    { id:'pitched_blue', name:'斜頂(藍)', price:400, mats:{wood:10}, build: () => _roofPitched(0x4488cc) },
+  ],
+  furniture: [
+    { id:'bed', name:'床', price:150, mats:{wood:5}, build: () => {
+      const g = new THREE.Group();
+      g.add(Object.assign(mk(2.4, 0.5, 1.4, 0x8B4513), {position: Object.assign(new THREE.Vector3(0,0.25,0))}));
+      const base = mk(2.4, 0.5, 1.4, 0x8B4513); base.position.y = 0.25; g.add(base);
+      const matp = mk(2.2, 0.3, 1.2, 0xff5050); matp.position.y = 0.65; g.add(matp);
+      const pillow = mk(0.6, 0.2, 0.5, 0xffffff); pillow.position.set(-0.7, 0.85, 0); g.add(pillow);
+      return g;
+    }},
+    { id:'table', name:'桌椅', price:120, mats:{wood:4}, build: () => {
+      const g = new THREE.Group();
+      const top = mk(1.8, 0.15, 1.2, 0x8B4513); top.position.y = 0.95; g.add(top);
+      [[-0.7,-0.5],[0.7,-0.5],[-0.7,0.5],[0.7,0.5]].forEach(([x,z])=>{
+        const leg = mk(0.12, 0.95, 0.12, 0x6a3a1a); leg.position.set(x, 0.475, z); g.add(leg);
+      });
+      const chairS = mk(0.6, 0.1, 0.6, 0x6a3a1a); chairS.position.set(0, 0.55, 1.5); g.add(chairS);
+      const chairB = mk(0.6, 0.7, 0.1, 0x6a3a1a); chairB.position.set(0, 0.95, 1.8); g.add(chairB);
+      return g;
+    }},
+    { id:'fur_chest', name:'寶箱', price:200, mats:{iron:2}, build: () => {
+      const g = new THREE.Group();
+      const base = mk(1.4, 0.8, 1.0, 0xc08040); base.position.y = 0.4; g.add(base);
+      const lid  = mk(1.4, 0.4, 1.0, 0xa06030); lid.position.y = 1.0; g.add(lid);
+      const lock = mk(0.2, 0.3, 0.05, 0xffd700); lock.position.set(0, 0.6, -0.51); g.add(lock);
+      return g;
+    }},
+  ],
+  decoration: [
+    { id:'flag_blue', name:'藍旗', price:50, mats:{wood:1}, build: () => {
+      const g = new THREE.Group();
+      const pole = mk(0.15, 3, 0.15, 0x3a2a1a); pole.position.y = 1.5; g.add(pole);
+      const cloth = mk(1.5, 1, 0.05, 0x4488ff); cloth.position.set(0.8, 2.5, 0); g.add(cloth);
+      return g;
+    }},
+    { id:'plant', name:'盆栽', price:80, mats:{}, build: () => {
+      const g = new THREE.Group();
+      const pot = mk(0.8, 0.5, 0.8, 0x8B4513); pot.position.y = 0.25; g.add(pot);
+      const leaves = mk(1.0, 1.2, 1.0, 0x44aa44); leaves.position.y = 1.1; g.add(leaves);
+      return g;
+    }},
+    { id:'lamp', name:'路燈', price:120, mats:{iron:1}, build: () => {
+      const g = new THREE.Group();
+      const pole = mk(0.18, 2.6, 0.18, 0x222222); pole.position.y = 1.3; g.add(pole);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.4, 8, 6),
+        new THREE.MeshBasicMaterial({color: 0xffee66}));
+      lamp.position.y = 2.7; g.add(lamp);
+      return g;
+    }},
+  ],
+};
+const BUILD_SLOT_OFFSETS = {
+  floor:      { x: 0, y: 0, z: 0 },
+  walls:      { x: 0, y: 0, z: 0 },
+  roof:       { x: 0, y: 0, z: 0 },
+  furniture:  { x:-3, y: 0, z:-3 },     // back-left corner
+  decoration: { x: 4, y: 0, z: 4 },     // front-right corner
+};
+
 function makeConstructionSign(ownerName){
   const g = new THREE.Group();
   const pole = mk(0.2, 2, 0.2, 0x3a2a1a); pole.position.y = 1; g.add(pole);
@@ -696,14 +843,45 @@ function makeConstructionSign(ownerName){
   g.add(label);
   return g;
 }
-function showPlotSign(plot){
+function refreshPlotVisual(plot){
   if (plot.sign){ scene.remove(plot.sign); plot.sign = null; }
+  if (plot.buildGroup){ scene.remove(plot.buildGroup); plot.buildGroup = null; }
   if (!plot.ownerId) return;
-  const sg = makeConstructionSign(plot.ownerName || '???');
-  sg.position.set(plot.x, 0, plot.z);
-  scene.add(sg);
-  plot.sign = sg;
+  const b = plot.build || {};
+  const hasAny = b.floor || b.walls || b.roof || b.furniture || b.decoration;
+  if (!hasAny){
+    // Show construction sign while plot is empty
+    const sg = makeConstructionSign(plot.ownerName || '???');
+    sg.position.set(plot.x, 0, plot.z);
+    scene.add(sg);
+    plot.sign = sg;
+    return;
+  }
+  // Build the placed pieces
+  const g = new THREE.Group();
+  g.position.set(plot.x, 0, plot.z);
+  for (const cat of ['floor','walls','roof','furniture','decoration']){
+    const id = b[cat];
+    if (!id) continue;
+    const item = (BUILD_ITEMS[cat] || []).find(it => it.id === id);
+    if (!item) continue;
+    const sub = item.build();
+    const off = BUILD_SLOT_OFFSETS[cat];
+    sub.position.x += off.x;
+    sub.position.y += off.y;
+    sub.position.z += off.z;
+    g.add(sub);
+  }
+  // Owner-name banner
+  const label = makeNameLabel(plot.ownerName || '???');
+  label.position.set(0, 6, 0);
+  label.scale.set(3.4, 0.85, 1);
+  g.add(label);
+  scene.add(g);
+  plot.buildGroup = g;
 }
+// Backwards-compat alias for older call sites
+const showPlotSign = refreshPlotVisual;
 
 // ============================================================
 // COINS
@@ -1258,6 +1436,7 @@ window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyB') toggleShop();
   if (e.code === 'KeyC') toggleCosShop();
+  if (e.code === 'KeyH') toggleBuildShop();
   if (e.code === 'KeyP' && state.plotPromptId && state.money >= PLOT_PRICE){
     state.money -= PLOT_PRICE;
     saveProgress();
@@ -1277,6 +1456,7 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Escape'){
     if (shopOpen) toggleShop();
     else if (cosShopOpen) toggleCosShop();
+    else if (buildShopOpen) toggleBuildShop();
   }
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
@@ -1662,6 +1842,111 @@ function toggleShop(){
   hud.shop.classList.toggle('show', shopOpen);
   if (shopOpen) renderShop();
 }
+
+// ===== Build shop (per plot) =====
+let buildShopOpen = false;
+let buildShopTab = 'floor';
+let buildShopPlot = null;     // currently-edited plot
+function getNearestOwnedPlot(){
+  for (const p of PLOTS){
+    if (!p.ownerId) continue;
+    const isMine = (mpMyId && p.ownerId === mpMyId) || p.ownerId === 'local';
+    if (!isMine) continue;
+    const dx = player.position.x - p.x;
+    const dz = player.position.z - p.z;
+    if (dx*dx + dz*dz < 6*6) return p;
+  }
+  return null;
+}
+function toggleBuildShop(){
+  if (buildShopOpen){
+    buildShopOpen = false;
+    buildShopPlot = null;
+    document.getElementById('build-shop').classList.remove('show');
+    return;
+  }
+  const plot = getNearestOwnedPlot();
+  if (!plot){ toast('要站在自己的地塊上才能開啟建造選單'); return; }
+  buildShopPlot = plot;
+  buildShopOpen = true;
+  document.getElementById('build-shop').classList.add('show');
+  renderBuildShop();
+}
+function canAfford(item){
+  if (state.money < item.price) return false;
+  for (const m of Object.keys(item.mats || {})){
+    if ((state[m] || 0) < item.mats[m]) return false;
+  }
+  return true;
+}
+function spendForBuildItem(item){
+  state.money -= item.price;
+  for (const m of Object.keys(item.mats || {})){
+    state[m] -= item.mats[m];
+  }
+  saveProgress();
+}
+function renderBuildShop(){
+  document.getElementById('b-money').textContent = state.money;
+  document.getElementById('b-wood').textContent  = state.wood;
+  document.getElementById('b-stone').textContent = state.stone;
+  document.getElementById('b-iron').textContent  = state.iron;
+  document.querySelectorAll('#b-tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.cat === buildShopTab);
+  });
+  const list = document.getElementById('b-list');
+  list.innerHTML = '';
+  const slot = buildShopTab;
+  const cur = buildShopPlot?.build?.[slot] || '';
+  (BUILD_ITEMS[slot] || []).forEach(item => {
+    const eq = cur === item.id;
+    const matStr = Object.keys(item.mats || {}).map(m => {
+      const need = item.mats[m];
+      const have = state[m] || 0;
+      const cls = have >= need ? 'ok' : 'bad';
+      const ico = m === 'wood' ? '🪵' : m === 'stone' ? '🪨' : '⚙️';
+      return `<span class="${cls}">${ico}${need}</span>`;
+    }).join(' ');
+    const moneyCls = state.money >= item.price ? 'ok' : 'bad';
+    const ok = canAfford(item);
+    const div = document.createElement('div');
+    div.className = 'b-item' + (eq ? ' equipped' : '');
+    div.innerHTML = `
+      <div class="name">${item.name}${eq ? ' ✓' : ''}</div>
+      <div class="cost"><span class="${moneyCls}">$${item.price}</span> ${matStr}</div>
+      <button data-id="${item.id}" ${eq || !ok ? 'disabled' : ''}>${eq ? '已裝' : '建造'}</button>
+    `;
+    list.appendChild(div);
+  });
+}
+document.getElementById('b-tabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-cat]');
+  if (!b) return;
+  buildShopTab = b.dataset.cat;
+  renderBuildShop();
+});
+document.getElementById('b-list').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-id]');
+  if (!btn || btn.disabled || !buildShopPlot) return;
+  const item = (BUILD_ITEMS[buildShopTab] || []).find(it => it.id === btn.dataset.id);
+  if (!item || !canAfford(item)) return;
+  spendForBuildItem(item);
+  buildShopPlot.build = buildShopPlot.build || { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
+  buildShopPlot.build[buildShopTab] = item.id;
+  refreshPlotVisual(buildShopPlot);
+  if (mpAuthoritative && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+    mpSocket.send(JSON.stringify({
+      type: 'plot_build',
+      plotId: buildShopPlot.id,
+      slot: buildShopTab,
+      itemId: item.id,
+    }));
+  }
+  sfx.buy();
+  toast(`${item.name} 建好了！`);
+  renderBuildShop();
+  updateHUD();
+});
 
 // ===== Cosmetic shop =====
 let cosShopOpen = false;
@@ -2073,18 +2358,23 @@ function update(now){
   // ----- Plot proximity prompt -----
   state.plotPromptId = null;
   if (state.alive && player.position.z > 20){
-    let nearest = null, bestSq = PLOT_PROMPT_RADIUS * PLOT_PROMPT_RADIUS;
+    let nearestUnowned = null, bestSqU = PLOT_PROMPT_RADIUS * PLOT_PROMPT_RADIUS;
+    let onMine = null;
     for (const p of PLOTS){
-      if (p.ownerId) continue;
       const dx = player.position.x - p.x;
       const dz = player.position.z - p.z;
       const d = dx*dx + dz*dz;
-      if (d < bestSq){ bestSq = d; nearest = p; }
+      const isMine = p.ownerId && ((mpMyId && p.ownerId === mpMyId) || p.ownerId === 'local');
+      if (isMine && d < 6*6 && (!onMine || d < onMine._d)){ onMine = p; onMine._d = d; }
+      if (!p.ownerId && d < bestSqU){ bestSqU = d; nearestUnowned = p; }
     }
-    if (nearest){
+    if (onMine){
+      hud.plotPrompt.textContent = `按 H 蓋房子（你的地塊「${onMine.id}」）`;
+      hud.plotPrompt.classList.add('show');
+    } else if (nearestUnowned){
       if (state.money >= PLOT_PRICE){
-        hud.plotPrompt.textContent = `按 P 購買「${nearest.id}」($${PLOT_PRICE})`;
-        state.plotPromptId = nearest.id;
+        hud.plotPrompt.textContent = `按 P 購買「${nearestUnowned.id}」($${PLOT_PRICE})`;
+        state.plotPromptId = nearestUnowned.id;
       } else {
         hud.plotPrompt.textContent = `空地需 $${PLOT_PRICE}（你 $${state.money}）`;
       }
@@ -2684,7 +2974,8 @@ function mpHandleMessage(raw){
           if (!p) return;
           p.ownerId = srvP.ownerId;
           p.ownerName = srvP.ownerName;
-          showPlotSign(p);
+          p.build = srvP.build || { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
+          refreshPlotVisual(p);
         });
       }
       for (const ts of tsunamis) scene.remove(ts.obj.group);
@@ -2800,10 +3091,17 @@ function mpHandleMessage(raw){
     if (p){
       p.ownerId = msg.ownerId;
       p.ownerName = msg.ownerName;
-      showPlotSign(p);
-      if (msg.ownerId === mpMyId) toast(`購買「${p.id}」完成！`);
+      p.build = { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
+      refreshPlotVisual(p);
+      if (msg.ownerId === mpMyId) toast(`購買「${p.id}」完成！按 H 蓋房子`);
       else toast(`${msg.ownerName} 買下「${p.id}」`);
     }
+  } else if (msg.type === 'plot_built'){
+    const p = PLOTS.find(x => x.id === msg.plotId);
+    if (!p) return;
+    p.build = p.build || { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
+    p.build[msg.slot] = msg.itemId || '';
+    refreshPlotVisual(p);
   } else if (msg.type === 'big_treasure_spawn'){
     spawnBigTreasureMesh(msg.x, msg.z);
     toast('★ 大寶箱重新出現！($' + msg.value + ')');
