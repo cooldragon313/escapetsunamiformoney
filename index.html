@@ -351,7 +351,7 @@
   <kbd>Shift</kbd> 衝刺 ·
   <kbd>B</kbd> 商店（山頂） ·
   <kbd>右鍵拖曳</kbd> 轉鏡頭 / <kbd>R</kbd> 復位 ·
-  踩到坑會自動潛入（3 秒）· 跳高 Lv 不夠的坑會擋你進不去 ·
+  跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
   <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
   <span style="color:#5588ff">藍標準</span> · <span style="color:#ff5050">紅快</span> · <span style="color:#88aaff">寬</span> · <span style="color:#aa88ff">紫巨/黑災 必躲坑</span>
 </div>
@@ -412,6 +412,30 @@ function groundY(z){
   if (z >= HILL_END_Z) return HILL_PEAK;
   const stepIdx = Math.floor((z - HILL_START_Z) / HILL_STEP_LEN);
   return (stepIdx + 1) * HILL_STEP_RISE;
+}
+// Floor height taking pits into account (returns -depth if standing over an
+// accessible pit). pits[] is populated below in spawnPits() — this function
+// runs only inside the game loop, by which time pits are ready.
+function floorAt(x, z){
+  if (z > HILL_START_Z) return groundY(z);
+  for (let i = 0; i < pits.length; i++){
+    const p = pits[i];
+    const dx = (x - p.x) / p.rx;
+    const dz = (z - p.z) / p.rz;
+    if (dx*dx + dz*dz < 1) return -p.depth;
+  }
+  return 0;
+}
+// Whether the given world position is steppable. Inaccessible pits (jumpReq
+// not met) act as solid barriers so the player can't even walk onto them.
+function canStepOn(x, z){
+  for (let i = 0; i < pits.length; i++){
+    const p = pits[i];
+    const dx = (x - p.x) / p.rx;
+    const dz = (z - p.z) / p.rz;
+    if (dx*dx + dz*dz < 1 && state.upgrades.jump < (p.jumpReq ?? 0)) return false;
+  }
+  return true;
 }
 
 const STATS_BASE = {
@@ -740,7 +764,13 @@ function spawnPits(){
     rim.position.set(x, 0.03, z);
     hole.position.set(x, 0.04, z);
     scene.add(rim); scene.add(hole);
-    pits.push({ x, z, rx: 3.5 * sizeMul, rz: 2.5 * sizeMul, zone, jumpReq: zone });
+    pits.push({
+      x, z,
+      rx: 3.5 * sizeMul, rz: 2.5 * sizeMul,
+      zone,
+      jumpReq: zone,
+      depth: 1.5 + zone * 0.5,    // shallow pit in zone 0, deeper as you go
+    });
     z -= spacing;
   }
 }
@@ -1044,7 +1074,7 @@ const state = {
   buffMagnetUntil: 0,
   nextSpawnIn: 4,             // randomized wait until next wave
   coinRefreshAccum: 0,
-  lastExitedPit: null,
+  lastY: 0,                    // for pit-enter / climb-out SFX trigger
   storm: false,                // storm phase active
   stormUntil: 0,
   stormCooldownUntil: 25,      // earliest time (in t-seconds) for first storm
@@ -1233,8 +1263,8 @@ function killPlayer(){
   deathTimer = setTimeout(() => {
     player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
     state.vy = 0;
-    state.inPit = null;
-    state.lastExitedPit = null;
+    state.inPit = false;
+    state.lastY = 0;
     state.alive = true;
     hud.death.classList.remove('show');
     updateHUD();
@@ -1273,20 +1303,41 @@ function update(now){
     const sprint = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.5 : 1.0;
     const buff = (t < state.buffSpeedUntil) ? 1.5 : 1.0;
     const bodyMul = BODY_SPEED_MUL[(state.custom && state.custom.body) || 'normal'] || 1.0;
-    if (!state.inPit && (mx !== 0 || mz !== 0)){
+    if ((mx !== 0 || mz !== 0)){
       if (!analog){
         const len = Math.hypot(mx, mz);
         mx /= len; mz /= len;
       }
-      // Rotate input vector by camera yaw so 'forward' is into the screen
       const cy = Math.cos(state.cameraYaw);
       const sy = Math.sin(state.cameraYaw);
       const worldMx =  mx * cy + mz * sy;
       const worldMz = -mx * sy + mz * cy;
       const sp = state.speed * 60 * dt * sprint * buff * bodyMul;
-      player.position.x += worldMx * sp;
-      player.position.z += worldMz * sp;
-      // Face direction of motion
+      const newX = player.position.x + worldMx * sp;
+      const newZ = player.position.z + worldMz * sp;
+      // Block movement if (a) target is on a pit we're not qualified to enter,
+      // or (b) target floor is too high to step up to (pit edges while we're
+      // inside force a vertical jump to escape)
+      const blockedByPit = !canStepOn(newX, newZ);
+      const newFloor = blockedByPit ? Infinity : floorAt(newX, newZ);
+      const canStep = !blockedByPit && (player.position.y >= newFloor - 0.7);
+      if (canStep){
+        player.position.x = newX;
+        player.position.z = newZ;
+      } else if (blockedByPit){
+        if (performance.now() - (state.lastBlockedPitToast ?? 0) > 1800){
+          for (const p of pits){
+            const dx = (newX - p.x) / p.rx;
+            const dz = (newZ - p.z) / p.rz;
+            if (dx*dx + dz*dz < 1){
+              toast(`此坑要跳高 Lv ${p.jumpReq}（你 Lv ${state.upgrades.jump}）`);
+              state.lastBlockedPitToast = performance.now();
+              sfx.blocked();
+              break;
+            }
+          }
+        }
+      }
       if (Math.hypot(worldMx, worldMz) > 0.1){
         player.rotation.y = Math.atan2(-worldMx, -worldMz);
       }
@@ -1296,9 +1347,9 @@ function update(now){
     player.position.z = Math.min(HILL_END_Z, Math.max(-RUNWAY_LEN + 5, player.position.z));
 
     // jump (jump-buff multiplies the impulse)
-    const floor = groundY(player.position.z);
+    const floor = floorAt(player.position.x, player.position.z);
     const jumpBuffMul = (t < state.buffJumpUntil) ? 1.5 : 1.0;
-    if (keys['Space'] && Math.abs(player.position.y - floor) < 0.05 && !state.inPit){
+    if (keys['Space'] && Math.abs(player.position.y - floor) < 0.05){
       state.vy = state.jump * jumpBuffMul;
       sfx.jump();
     }
@@ -1309,47 +1360,20 @@ function update(now){
       player.position.y = floor; state.vy = 0;
     }
   }
+  // Pit-enter / climb-out SFX based on Y crossing 0
+  if (state.alive){
+    const wasBelow = state.lastY < -0.3;
+    const isBelow  = player.position.y < -0.3;
+    if (!wasBelow && isBelow) sfx.pitEnter();
+    else if (wasBelow && !isBelow) sfx.climbOut();
+    state.lastY = player.position.y;
+    // Derived flag for animation / multiplayer sync
+    state.inPit = player.position.y < -0.3;
+  }
 
-  // ----- Pit gate (jump level must be high enough to use deep pits) -----
-  if (state.alive && !state.inPit && player.position.y < 0.5){
-    for (const p of pits){
-      if (p === state.lastExitedPit) continue;     // prevents instant re-entry
-      const dx = (player.position.x - p.x) / p.rx;
-      const dz = (player.position.z - p.z) / p.rz;
-      if (dx*dx + dz*dz < 1){
-        if (state.upgrades.jump < (p.jumpReq ?? 0)){
-          if (performance.now() - (state.lastBlockedPitToast ?? 0) > 1800){
-            toast(`此坑需要跳高 Lv ${p.jumpReq}（目前 Lv ${state.upgrades.jump}）`);
-            state.lastBlockedPitToast = performance.now();
-            sfx.blocked();
-          }
-        } else {
-          state.inPit = p;
-          state.pitUntil = performance.now() + 3000;
-          player.position.y = -1.4;
-          toast('躲進坑');
-          sfx.pitEnter();
-        }
-        break;
-      }
-    }
-    // Clear the "just exited" lock once the player has walked outside that pit
-    if (state.lastExitedPit){
-      const p = state.lastExitedPit;
-      const dx = (player.position.x - p.x) / p.rx;
-      const dz = (player.position.z - p.z) / p.rz;
-      if (dx*dx + dz*dz >= 1) state.lastExitedPit = null;
-    }
-  }
-  if (state.inPit){
-    if (performance.now() > state.pitUntil){
-      state.lastExitedPit = state.inPit;
-      state.inPit = null;
-      player.position.y = groundY(player.position.z);
-      toast('爬出坑洞');
-      sfx.climbOut();
-    }
-  }
+  // (Pit auto-enter / 3s timer removed — pits are now physical holes; gravity
+  //  drops the player in, jumping climbs them out, movement gating prevents
+  //  walking onto an inaccessible pit.)
 
   // ----- Coin pickup -----
   if (state.alive){
@@ -1579,8 +1603,8 @@ function update(now){
     ts.obj.foam.forEach(f => {
       f.position.y = foamBaseY + Math.sin(t * 4 + f.userData.phase) * 0.3;
     });
-    // collision (always client-local — each player decides their own death)
-    if (state.alive && player.position.z < SAFETY_LINE_Z && !state.inPit){
+    // Collision: in-pit (y < -0.3) is safe; jumped above low waves is safe
+    if (state.alive && player.position.z < SAFETY_LINE_Z && player.position.y >= -0.3){
       const dz = player.position.z - ts.obj.group.position.z;
       const dx = player.position.x - ts.obj.group.position.x;
       const halfW = ts.obj.wallW / 2;
@@ -2271,11 +2295,11 @@ const PALETTES = {
 };
 const TUTORIAL_STEPS = [
   '用 WASD（或左下搖桿）跑出基地，撿沿途的金幣。深區金幣更值錢。',
-  '看到「海嘯警報」就反應：綠色矮浪 → 跳躍越過；紫色巨浪 / 黑色災難 → 必須躲坑。',
-  '坑緣有顏色，標示需要的跳高 Lv：棕（任何人）/ 綠 Lv 1 / 藍 Lv 2 / 紫 Lv 3 / 紅 Lv 4。',
-  '跳高不夠的坑會被擋下，不會把你關住，但也不會擋浪 — 在山頂商店升級跳高才能用深區的坑。',
+  '看到「海嘯警報」就反應：綠色矮浪 → 跳躍越過；紫色巨浪 / 黑色災難 → 跳進坑裡躲。',
+  '坑現在是真的洞 — 跳進去（按 Space）、海嘯過後再跳出來。坑緣顏色標記需要的跳高 Lv（棕 / 綠 / 藍 / 紫 / 紅 …）',
+  '跳高不夠的坑「走不過去」— 整個坑當成牆，得繞開或回基地升級跳高。',
   '活著回到山頂（金色光柱）→ 自動把背包換成存款。按 B 開商店升級裝備。',
-  '死了寶藏會掉在原地變大金箱，下一條命可以回去撿（不佔背包格）。',
+  '死了寶藏掉在原地變大金箱，所有玩家都能撿。背包滿時撿到剩餘的會灑在地上變散幣。',
 ];
 
 function setMenuMode(on){
