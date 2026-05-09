@@ -1,91 +1,246 @@
-// Escape Tsunami For Money — multiplayer relay server.
+// Escape Tsunami For Money — multiplayer authoritative world server.
 //
-// Phase 1A: pure position relay. Each player's tsunamis & coins are still
-// local; we just broadcast everyone's position / facing / animation flags so
-// you can see your friends running around the same world.
-//
-// Phase 1B (next iteration) will move tsunami spawning here so everyone
-// shares the same waves.
+// Phase 1B: server owns coins, tsunamis, and the storm cycle. Clients render
+// what the server tells them; coin pickups race through the server so first
+// player to claim wins.
+
+const RUNWAY_LEN     = 1000;
+const RUNWAY_HALF_W  = 20;
+const ZONE_LEN       = 200;
+const NUM_ZONES      = 5;
+const HILL_START_Z   = 4;
+const COIN_RESPAWN_MS = 60_000;
+
+const WAVE_TYPES = [
+  { id:'green',  height:3.0, width:14, speedMul:1.0,  weight:18, storm:false },
+  { id:'blue',   height:6,   width:18, speedMul:1.0,  weight:30, storm:false },
+  { id:'red',    height:7,   width:14, speedMul:1.8,  weight:18, storm:false },
+  { id:'wide',   height:6,   width:32, speedMul:0.85, weight:14, storm:false },
+  { id:'purple', height:14,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:8, storm:true },
+  { id:'titan',  height:22,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:3, storm:true },
+];
+function pickWaveType(stormBoost){
+  let total = 0;
+  for (const w of WAVE_TYPES) total += w.weight * (stormBoost && w.storm ? 3.5 : 1);
+  let r = Math.random() * total;
+  for (const w of WAVE_TYPES){
+    r -= w.weight * (stormBoost && w.storm ? 3.5 : 1);
+    if (r <= 0) return w;
+  }
+  return WAVE_TYPES[1];
+}
 
 export default class WorldServer {
-  constructor(room) {
+  constructor(room){
     this.room = room;
-    this.players = new Map();   // connection.id -> player record
+    this.players = new Map();
+
+    // Persistent world (in-memory; resets when the Durable Object hibernates)
+    this.coins = [];
+    this.waves = [];
+    this.nextWaveId = 1;
+    this.spawnAccum = 0;
+    this.nextSpawnIn = 4;
+    this.storm = false;
+    this.stormUntil = 0;
+    this.stormCooldownUntil = Date.now() + 25_000;
+
+    this.spawnInitialCoins();
+    this.lastTick = Date.now();
+    this.tickHandle = setInterval(() => this.tick(), 50);
   }
 
-  onConnect(conn) {
+  spawnInitialCoins(){
+    let id = 1;
+    for (let zone = 0; zone < NUM_ZONES; zone++){
+      const zStart = -(zone) * ZONE_LEN - 15;
+      const zEnd   = -(zone + 1) * ZONE_LEN + 5;
+      const count  = 14 + zone * 10;
+      const value  = 1 + zone;
+      for (let i = 0; i < count; i++){
+        this.coins.push({
+          id: id++,
+          x: (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 1),
+          z: zStart - Math.random() * (zStart - zEnd),
+          value,
+          available: true,
+          respawnAt: 0,
+        });
+      }
+    }
+  }
+
+  tick(){
+    const now = Date.now();
+    const dt = (now - this.lastTick) / 1000;
+    this.lastTick = now;
+
+    // Coin respawn
+    for (const c of this.coins){
+      if (!c.available && c.respawnAt && now >= c.respawnAt){
+        c.available = true;
+        c.respawnAt = 0;
+        this.broadcast({ type: 'coin_respawn', id: c.id });
+      }
+    }
+
+    // Storm phase machine
+    if (!this.storm && now >= this.stormCooldownUntil && Math.random() < dt * 0.025){
+      this.storm = true;
+      this.stormUntil = now + (14 + Math.random() * 8) * 1000;
+      this.broadcast({ type: 'storm_start' });
+    }
+    if (this.storm && now > this.stormUntil){
+      this.storm = false;
+      this.stormCooldownUntil = now + (30 + Math.random() * 50) * 1000;
+      this.broadcast({ type: 'storm_end' });
+    }
+
+    // Wave spawning (only if at least one player is in danger zone)
+    if (this.players.size > 0){
+      this.spawnAccum += dt;
+      if (this.spawnAccum > this.nextSpawnIn){
+        this.spawnAccum = 0;
+        if (this.storm){
+          this.nextSpawnIn = 0.8 + Math.random() * 1.6;
+        } else {
+          const r = Math.random();
+          if (r < 0.6)       this.nextSpawnIn = 3 + Math.random() * 3;
+          else if (r < 0.85) this.nextSpawnIn = 1.5 + Math.random();
+          else               this.nextSpawnIn = 8 + Math.random() * 8;
+        }
+
+        // Use the deepest player to set difficulty
+        let minZ = 8;
+        for (const p of this.players.values()) if (p.z < minZ) minZ = p.z;
+
+        // Only actually spawn if at least one player has crossed safety line
+        if (minZ < 5){
+          const wt = pickWaveType(this.storm);
+          const fromZ = -RUNWAY_LEN + 5;
+          const dist = minZ - fromZ;
+          const depthFactor = Math.min(1, Math.max(0, -minZ) / RUNWAY_LEN);
+          const approach = (10 - depthFactor * 4) / wt.speedMul;
+          const speed = Math.max(0.30 * wt.speedMul, dist / approach / 60);
+
+          const partial = wt.width < RUNWAY_HALF_W * 1.7;
+          const baseX = partial ? (Math.random() * 2 - 1) * (RUNWAY_HALF_W - wt.width/2 - 1) : 0;
+          const lateralAmp = partial ? Math.min(RUNWAY_HALF_W - wt.width/2 - 1, 4 + Math.random() * 6) : 0;
+
+          const wave = {
+            id: this.nextWaveId++,
+            waveTypeId: wt.id,
+            speed,
+            fromZ,
+            baseX,
+            lateralAmp,
+            lateralPhase: Math.random() * Math.PI * 2,
+            lateralFreq: 0.5 + Math.random() * 1.0,
+            spawnTime: now,
+          };
+          this.waves.push(wave);
+          this.broadcast({ type: 'wave_spawn', wave });
+        }
+      }
+    }
+
+    // Wave removal once past hill base
+    for (let i = this.waves.length - 1; i >= 0; i--){
+      const w = this.waves[i];
+      const elapsed = (now - w.spawnTime) / 1000;
+      const z = w.fromZ + w.speed * 60 * elapsed;
+      if (z > HILL_START_Z){
+        this.waves.splice(i, 1);
+        this.broadcast({ type: 'wave_remove', id: w.id });
+      }
+    }
+  }
+
+  broadcast(obj, except){
+    this.room.broadcast(JSON.stringify(obj), except || []);
+  }
+
+  onConnect(conn){
     const player = {
-      id: conn.id,
-      name: '???',
-      custom: null,
-      x: 0, y: 0, z: 8, ry: 0,
-      moving: false, inPit: false,
+      id: conn.id, name: '???', custom: null,
+      x: 0, y: 0, z: 8, ry: 0, moving: false, inPit: false,
     };
     this.players.set(conn.id, player);
 
-    // Tell the new player who else is here (and their own id)
+    // Send full world snapshot
     conn.send(JSON.stringify({
       type: 'init',
       yourId: conn.id,
       players: Array.from(this.players.values()),
+      coins: this.coins.filter(c => c.available).map(c => ({
+        id: c.id, x: c.x, z: c.z, value: c.value,
+      })),
+      waves: this.waves,
+      storm: this.storm,
     }));
 
-    // Tell everyone else someone joined
-    this.room.broadcast(JSON.stringify({
-      type: 'join',
-      player,
-    }), [conn.id]);
+    this.broadcast({ type: 'join', player }, [conn.id]);
   }
 
-  onMessage(raw, sender) {
+  onMessage(raw, sender){
     let msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
     const player = this.players.get(sender.id);
     if (!player) return;
 
-    if (msg.type === 'state') {
+    if (msg.type === 'state'){
       player.x = +msg.x || 0;
       player.y = +msg.y || 0;
       player.z = +msg.z || 0;
       player.ry = +msg.ry || 0;
       player.moving = !!msg.moving;
-      player.inPit = !!msg.inPit;
-      this.room.broadcast(JSON.stringify({
+      player.inPit  = !!msg.inPit;
+      this.broadcast({
         type: 'state',
         id: sender.id,
         x: player.x, y: player.y, z: player.z, ry: player.ry,
         moving: player.moving, inPit: player.inPit,
-      }), [sender.id]);
-    } else if (msg.type === 'identify') {
+      }, [sender.id]);
+    } else if (msg.type === 'identify'){
       player.name = String(msg.name || '???').slice(0, 16);
       player.custom = msg.custom || null;
-      this.room.broadcast(JSON.stringify({
+      this.broadcast({
         type: 'identify',
         id: sender.id,
         name: player.name,
         custom: player.custom,
-      }), [sender.id]);
-    } else if (msg.type === 'chat') {
+      }, [sender.id]);
+    } else if (msg.type === 'pickup_attempt'){
+      const coin = this.coins.find(c => c.id === msg.coinId);
+      if (coin && coin.available){
+        coin.available = false;
+        coin.respawnAt = Date.now() + COIN_RESPAWN_MS;
+        this.broadcast({
+          type: 'coin_pickup',
+          id: coin.id,
+          byId: sender.id,
+          byName: player.name,
+          value: coin.value,
+        });
+      }
+    } else if (msg.type === 'chat'){
       const text = String(msg.text || '').slice(0, 120);
       if (!text) return;
-      this.room.broadcast(JSON.stringify({
+      this.broadcast({
         type: 'chat',
         id: sender.id,
         name: player.name,
         text,
-      }));
+      });
     }
   }
 
-  onClose(conn) {
+  onClose(conn){
     this.players.delete(conn.id);
-    this.room.broadcast(JSON.stringify({
-      type: 'leave',
-      id: conn.id,
-    }));
+    this.broadcast({ type: 'leave', id: conn.id });
   }
 
-  onError(conn, err) {
+  onError(conn, err){
     console.error('WorldServer error', err);
   }
 }

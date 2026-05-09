@@ -329,6 +329,7 @@
 // 'etfm.cooldragon313.partykit.dev'. For local dev: 'localhost:1999'.
 const PARTYKIT_HOST = 'etfm.cooldragon313.partykit.dev';
 const MP_ROOM = 'global';
+const MP_ENABLED = !!PARTYKIT_HOST;
 
 const RUNWAY_LEN     = 1000;
 const RUNWAY_HALF_W  = 20;          // 40 person-widths total
@@ -523,7 +524,18 @@ function spawnInitialCoins(){
     }
   }
 }
-spawnInitialCoins();
+function addCoinFromServer(sc){
+  const m = new THREE.Mesh(coinGeo, coinMat);
+  m.position.set(sc.x, 0.7, sc.z);
+  scene.add(m);
+  coins.push({ id: sc.id, mesh: m, x: sc.x, z: sc.z, value: sc.value, collected: false, dropped: false, attempting: false });
+}
+function clearAllCoins(){
+  for (const c of coins){ if (c.mesh) scene.remove(c.mesh); }
+  coins.length = 0;
+}
+// In single-player mode coins spawn locally; in MP they arrive via 'init'
+if (!MP_ENABLED) spawnInitialCoins();
 
 // ============================================================
 // PITS
@@ -1065,14 +1077,19 @@ function update(now){
       const dz = player.position.z - c.z;
       if (dx*dx + dz*dz < state.pickupRadius * state.pickupRadius){
         if (c.dropped){
-          // Dropped death chest takes 1 bag slot but holds its full value;
-          // must still be brought back to base
+          // Death chests are local — server doesn't track per-player drops yet
           if (state.bag < state.carryMax){
             state.bag += 1;
             state.bagValue += c.value;
             c.collected = true;
             scene.remove(c.mesh);
             toast(`找回死亡寶藏 +$${c.value}（帶回山頂存款）`);
+          }
+        } else if (MP_ENABLED){
+          // Race for coin via server; bag credit happens on coin_pickup confirmation
+          if (!c.attempting && state.bag < state.carryMax && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+            c.attempting = true;
+            mpSocket.send(JSON.stringify({ type: 'pickup_attempt', coinId: c.id }));
           }
         } else if (state.bag < state.carryMax){
           state.bag += 1;
@@ -1104,78 +1121,87 @@ function update(now){
     hud.hilltopPrompt.classList.remove('show');
   }
 
-  // ----- Coin replenishment (every 60s, restore picked-up coins; not chests) -----
-  state.coinRefreshAccum += dt;
-  if (state.coinRefreshAccum > 60){
-    state.coinRefreshAccum = 0;
-    let n = 0;
-    for (const c of coins){
-      if (c.collected && !c.dropped){
-        c.mesh.position.set(c.x, 0.7, c.z);
-        scene.add(c.mesh);
-        c.collected = false;
-        n++;
+  // ----- Coin replenishment (single-player only; MP mode driven by server) -----
+  if (!MP_ENABLED){
+    state.coinRefreshAccum += dt;
+    if (state.coinRefreshAccum > 60){
+      state.coinRefreshAccum = 0;
+      let n = 0;
+      for (const c of coins){
+        if (c.collected && !c.dropped){
+          c.mesh.position.set(c.x, 0.7, c.z);
+          scene.add(c.mesh);
+          c.collected = false;
+          n++;
+        }
       }
+      if (n > 0) toast(`💰 金幣補充 +${n} 個`);
     }
-    if (n > 0) toast(`💰 金幣補充 +${n} 個`);
   }
 
-  // ----- Storm system: occasional flurry with bonus loot -----
-  const depthFactor = Math.min(1, state.maxDist / RUNWAY_LEN);
-  if (!state.storm && t > state.stormCooldownUntil && Math.random() < dt * 0.025){
-    state.storm = true;
-    state.stormUntil = t + 14 + Math.random() * 8;     // 14–22s storm
-    scene.background = new THREE.Color(0x4a3030);
-    scene.fog.color.setHex(0x4a3030);
-    toast('⚡ 暴風雨來臨！海浪頻繁、寶藏倍增 ⚡');
-  }
-  if (state.storm && t > state.stormUntil){
-    state.storm = false;
-    state.stormCooldownUntil = t + 30 + Math.random() * 50;  // 30–80s rest
-    scene.background = new THREE.Color(0x87ceeb);
-    scene.fog.color.setHex(0x87ceeb);
-    toast('海面恢復平靜');
-  }
-
-  // ----- Tsunami spawning (random interval, optional storm) -----
-  state.spawnAccum += dt;
-  if (state.alive && !shopOpen && state.spawnAccum > state.nextSpawnIn){
-    state.spawnAccum = 0;
-    // Random spacing: storm = burst, otherwise wide jitter
-    if (state.storm){
-      state.nextSpawnIn = 0.8 + Math.random() * 1.6;       // 0.8–2.4s in storm
-    } else {
-      // 60% normal cadence, 25% short gap, 15% long lull
-      const r = Math.random();
-      if (r < 0.6) state.nextSpawnIn = 3 + Math.random() * 3;        // 3–6s
-      else if (r < 0.85) state.nextSpawnIn = 1.5 + Math.random();    // 1.5–2.5s
-      else state.nextSpawnIn = 8 + Math.random() * 8;                // 8–16s lull
+  // ----- Storm system + tsunami spawning (single-player only; MP server-driven) -----
+  if (!MP_ENABLED){
+    const depthFactor = Math.min(1, state.maxDist / RUNWAY_LEN);
+    if (!state.storm && t > state.stormCooldownUntil && Math.random() < dt * 0.025){
+      state.storm = true;
+      state.stormUntil = t + 14 + Math.random() * 8;
+      scene.background = new THREE.Color(0x4a3030);
+      scene.fog.color.setHex(0x4a3030);
+      toast('⚡ 暴風雨來臨！海浪頻繁、寶藏倍增 ⚡');
     }
-    if (player.position.z < SAFETY_LINE_Z){
-      const wt = pickWaveType(state.storm);
-      const fromZ = -RUNWAY_LEN + 5;
-      const dist = player.position.z - fromZ;
-      const approach = (WAVE_APPROACH_SEC - depthFactor * 4) / wt.speedMul;
-      const speed = Math.max(WAVE_MIN_SPEED * wt.speedMul, dist / approach / 60);
-      spawnTsunami({ fromZ, speed, waveType: wt });
+    if (state.storm && t > state.stormUntil){
+      state.storm = false;
+      state.stormCooldownUntil = t + 30 + Math.random() * 50;
+      scene.background = new THREE.Color(0x87ceeb);
+      scene.fog.color.setHex(0x87ceeb);
+      toast('海面恢復平靜');
+    }
+
+    state.spawnAccum += dt;
+    if (state.alive && !shopOpen && state.spawnAccum > state.nextSpawnIn){
+      state.spawnAccum = 0;
+      if (state.storm){
+        state.nextSpawnIn = 0.8 + Math.random() * 1.6;
+      } else {
+        const r = Math.random();
+        if (r < 0.6) state.nextSpawnIn = 3 + Math.random() * 3;
+        else if (r < 0.85) state.nextSpawnIn = 1.5 + Math.random();
+        else state.nextSpawnIn = 8 + Math.random() * 8;
+      }
+      if (player.position.z < SAFETY_LINE_Z){
+        const wt = pickWaveType(state.storm);
+        const fromZ = -RUNWAY_LEN + 5;
+        const dist = player.position.z - fromZ;
+        const approach = (WAVE_APPROACH_SEC - depthFactor * 4) / wt.speedMul;
+        const speed = Math.max(WAVE_MIN_SPEED * wt.speedMul, dist / approach / 60);
+        spawnTsunami({ fromZ, speed, waveType: wt });
+      }
     }
   }
 
   // ----- Tsunami updates -----
   for (let i = tsunamis.length - 1; i >= 0; i--){
     const ts = tsunamis[i];
-    ts.obj.group.position.z += ts.speed * 60 * dt;
-    // Lateral drift for partial-width waves
-    if (ts.lateralAmp > 0){
-      ts.obj.group.position.x = ts.baseX + Math.sin(t * ts.lateralFreq + ts.lateralPhase) * ts.lateralAmp;
+    if (MP_ENABLED && ts.spawnTime){
+      // Server-authoritative: position derived from elapsed time so all clients agree
+      const elapsed = (Date.now() - ts.spawnTime) / 1000;
+      ts.obj.group.position.z = ts.fromZ + ts.speed * 60 * elapsed;
+      if (ts.lateralAmp > 0){
+        ts.obj.group.position.x = ts.baseX + Math.sin(elapsed * ts.lateralFreq + ts.lateralPhase) * ts.lateralAmp;
+      }
+    } else {
+      // Single-player local integration
+      ts.obj.group.position.z += ts.speed * 60 * dt;
+      if (ts.lateralAmp > 0){
+        ts.obj.group.position.x = ts.baseX + Math.sin(t * ts.lateralFreq + ts.lateralPhase) * ts.lateralAmp;
+      }
     }
     if (ts.state === 'warning' && performance.now() > ts.warnUntil) ts.state = 'advancing';
-    // foam undulation
     const foamBaseY = ts.obj.wallH + ts.obj.foamH/2;
     ts.obj.foam.forEach(f => {
       f.position.y = foamBaseY + Math.sin(t * 4 + f.userData.phase) * 0.3;
     });
-    // collision: must be inside both z-band AND x-band; jumpable waves can be cleared by jumping above height
+    // collision (always client-local — each player decides their own death)
     if (state.alive && player.position.z < SAFETY_LINE_Z && !state.inPit){
       const dz = player.position.z - ts.obj.group.position.z;
       const dx = player.position.x - ts.obj.group.position.x;
@@ -1188,8 +1214,8 @@ function update(now){
         }
       }
     }
-    // remove past safety line
-    if (ts.obj.group.position.z > TSUNAMI_STOP_Z){
+    // Single-player removes waves locally; MP waits for wave_remove from server
+    if (!MP_ENABLED && ts.obj.group.position.z > TSUNAMI_STOP_Z){
       scene.remove(ts.obj.group);
       tsunamis.splice(i, 1);
     }
@@ -1369,12 +1395,43 @@ function mpSendState(){
   }));
 }
 
+function addServerWave(w){
+  const wt = WAVE_TYPES.find(x => x.id === w.waveTypeId);
+  if (!wt) return;
+  const t3 = createTsunami(wt);
+  t3.group.position.z = w.fromZ;
+  t3.group.position.x = w.baseX;
+  scene.add(t3.group);
+  tsunamis.push({
+    id: w.id, obj: t3, waveType: wt,
+    speed: w.speed, fromZ: w.fromZ, baseX: w.baseX,
+    lateralAmp: w.lateralAmp, lateralPhase: w.lateralPhase, lateralFreq: w.lateralFreq,
+    spawnTime: w.spawnTime,
+    state: 'advancing',
+  });
+  showWarn(wt);
+}
+
 function mpHandleMessage(raw){
   let msg;
   try { msg = JSON.parse(raw); } catch (e) { return; }
+
   if (msg.type === 'init'){
     mpMyId = msg.yourId;
     msg.players.forEach(p => { if (p.id !== mpMyId) spawnOtherPlayer(p); });
+    // Replace local coins / waves with server snapshot
+    if (MP_ENABLED){
+      clearAllCoins();
+      msg.coins.forEach(addCoinFromServer);
+      for (const ts of tsunamis) scene.remove(ts.obj.group);
+      tsunamis.length = 0;
+      msg.waves.forEach(addServerWave);
+      state.storm = !!msg.storm;
+      if (msg.storm){
+        scene.background = new THREE.Color(0x4a3030);
+        scene.fog.color.setHex(0x4a3030);
+      }
+    }
     toast(`連線成功（線上 ${msg.players.length} 人）`);
   } else if (msg.type === 'join'){
     if (msg.player.id === mpMyId) return;
@@ -1395,6 +1452,48 @@ function mpHandleMessage(raw){
     if (msg.id === mpMyId) return;
     const o = otherPlayers.get(msg.id);
     if (o) rebuildOtherAvatar(o, { id: msg.id, name: msg.name, custom: msg.custom });
+  } else if (msg.type === 'wave_spawn'){
+    addServerWave(msg.wave);
+  } else if (msg.type === 'wave_remove'){
+    const idx = tsunamis.findIndex(ts => ts.id === msg.id);
+    if (idx >= 0){
+      scene.remove(tsunamis[idx].obj.group);
+      tsunamis.splice(idx, 1);
+    }
+  } else if (msg.type === 'coin_pickup'){
+    const c = coins.find(x => x.id === msg.id);
+    if (!c) return;
+    c.collected = true;
+    if (c.mesh) scene.remove(c.mesh);
+    if (msg.byId === mpMyId){
+      // I won the race
+      const lootMul = state.storm ? 2 : 1;
+      state.bag += 1;
+      state.bagValue += (msg.value ?? c.value) * lootMul;
+    } else if (msg.byName){
+      // brief feedback so the other player isn't invisible
+      // (only when they grab one near you — skipped here to avoid toast spam)
+    }
+  } else if (msg.type === 'coin_respawn'){
+    const c = coins.find(x => x.id === msg.id);
+    if (c){
+      c.collected = false;
+      c.attempting = false;
+      if (c.mesh){
+        c.mesh.position.set(c.x, 0.7, c.z);
+        scene.add(c.mesh);
+      }
+    }
+  } else if (msg.type === 'storm_start'){
+    state.storm = true;
+    scene.background = new THREE.Color(0x4a3030);
+    scene.fog.color.setHex(0x4a3030);
+    toast('⚡ 暴風雨來臨！海浪頻繁、寶藏倍增 ⚡');
+  } else if (msg.type === 'storm_end'){
+    state.storm = false;
+    scene.background = new THREE.Color(0x87ceeb);
+    scene.fog.color.setHex(0x87ceeb);
+    toast('海面恢復平靜');
   }
 }
 
