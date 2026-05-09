@@ -158,6 +158,20 @@
                   font-size: 14px; line-height: 1; }
   .swatch.selected { border-color: #ffd700;
                      box-shadow: 0 0 8px rgba(255,215,0,0.7); }
+  .profile-row { background: rgba(0,0,0,0.4); padding: 10px 14px;
+                 margin-bottom: 6px;
+                 display: flex; align-items: center; gap: 10px;
+                 border-left: 3px solid #4a8acf; }
+  .profile-row .pname { font-weight: bold; color: #fff; flex: 1; font-size: 14px; }
+  .profile-row .pstats { color: #aaa; font-size: 12px; }
+  .profile-row.active { border-left-color: #ffd700; background: rgba(60,50,0,0.4); }
+  .profile-row button { background: #2a4a8a; border: 1px solid #88c0ff;
+                        color: #fff; padding: 6px 12px; cursor: pointer;
+                        font-family: monospace; font-size: 12px; }
+  .profile-row button.danger { background: #aa3333; border-color: #ff5050;
+                               padding: 6px 10px; }
+  .profile-row button.danger:hover { background: #cc4444; }
+  .profile-row button:hover:not(.danger) { background: #3a5a9a; }
   #tutorial-text { font-size: 16px; line-height: 1.8; min-height: 80px;
                    color: #fff; padding: 16px; background: rgba(0,0,0,0.3);
                    border-left: 3px solid #88aaff; }
@@ -295,6 +309,19 @@
       <strong>你能跑到 1000 公尺嗎？</strong>
     </div>
     <button id="title-continue">開始冒險 →</button>
+  </div>
+</div>
+
+<div id="profile-screen" class="overlay hidden">
+  <div class="overlay-card">
+    <h2>選擇角色</h2>
+    <p style="color:#aaa; text-align:center; font-size:13px; margin: 8px 0 14px">每個角色獨立紀錄存款 / 升級 / 造型 / 房屋</p>
+    <div id="profile-list"></div>
+    <button id="profile-new" type="button">+ 新建角色</button>
+    <button id="profile-back" type="button"
+            style="background: transparent; border: 1px dashed #555; color: #888; font-size: 12px; padding: 4px 14px; margin-top: 10px;">
+      ← 回標題
+    </button>
   </div>
 </div>
 
@@ -1756,9 +1783,10 @@ const state = {
   alive: true,
   maxDist: 0,
   spawnAccum: 0,
-  gamePhase: 'title',          // 'title' | 'creator' | 'tutorial' | 'playing'
+  gamePhase: 'title',          // 'title' | 'profile' | 'creator' | 'tutorial' | 'playing'
   custom: DEFAULT_CUSTOM,
   tutorialStep: 0,
+  activeProfile: '',           // currently-loaded profile name (= state.custom.name)
   cameraYaw: 0,                 // orbit angle around player (0 = behind)
   cameraPitch: 0.55,            // elevation angle
   cameraDist: 9.5,              // zoom distance (4 = close-up, 25 = far)
@@ -1911,18 +1939,16 @@ function updateHUD(){
 let warnTimer = null;
 function showWarn(waveType){
   sfx.warn();
-  const lv = reqJumpLv(waveType.height);
-  let label, color;
-  if (waveType.lethal === 'fullscreen') { label = `${waveType.name}！躲坑或跳 Lv${lv}+`; color = '#ff8800'; }
-  else if (waveType.lethal === 'jumpable') { label = `${waveType.name}（跳 Lv${lv}+ 可過）`; color = '#88ff66'; }
-  else if (waveType.id === 'red') { label = `${waveType.name}！(快 / 跳 Lv${lv}+)`; color = '#ff5050'; }
-  else if (waveType.id === 'wide') { label = `${waveType.name}（很寬 / 跳 Lv${lv}+）`; color = '#5588ff'; }
-  else { label = `${waveType.name}海嘯（跳 Lv${lv}+）`; color = '#ff3030'; }
-  hud.warn.textContent = label;
-  hud.warn.style.color = color;
+  const colors = {
+    green:0x88ff66, blue:0x5588ff, red:0xff5050,
+    wide:0x88aaff, purple:0xaa88ff, titan:0xcc99ff,
+  };
+  const tag = waveType.lethal === 'fullscreen' ? '！' : '';
+  hud.warn.textContent = waveType.name + tag;
+  hud.warn.style.color = '#' + (colors[waveType.id] || 0xff3030).toString(16).padStart(6, '0');
   hud.warn.classList.add('show');
   clearTimeout(warnTimer);
-  warnTimer = setTimeout(() => hud.warn.classList.remove('show'), 2500);
+  warnTimer = setTimeout(() => hud.warn.classList.remove('show'), 1800);
 }
 
 let toastTimer = null;
@@ -2186,19 +2212,18 @@ document.getElementById('cos-list').addEventListener('click', e => {
     sfx.buy();
     toast(`購買 ${def.name}！`);
     saveProgress();
-    localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
     rebuildLocalAvatar();
     renderCosShop();
     updateHUD();
   } else if (btn.dataset.act === 'equip'){
     state.custom.cosmetics = state.custom.cosmetics || { hat:'', face:'', back:'', accessory:'' };
     state.custom.cosmetics[slot] = id;
-    localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
+    saveProgress();
     rebuildLocalAvatar();
     renderCosShop();
   } else if (btn.dataset.act === 'unequip'){
     if (state.custom.cosmetics) state.custom.cosmetics[slot] = '';
-    localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
+    saveProgress();
     rebuildLocalAvatar();
     renderCosShop();
   }
@@ -2207,14 +2232,18 @@ document.getElementById('cos-redesign').addEventListener('click', () => {
   if (state.money < 50) return;
   state.money -= 50;
   saveProgress();
-  // Close cosmetic shop, re-open creator screen as a "redesign" pass
   cosShopOpen = false;
   document.getElementById('cos-shop').classList.remove('show');
+  state._creatorMode = 'redesign';
   show('creator-screen');
   state.gamePhase = 'creator';
   setMenuMode(true);
   applyCustomToUI();
-  toast('-$50 整套造型重選');
+  // Lock name field — redesign keeps the same profile
+  const nameField = document.getElementById('name-input');
+  nameField.value = state.activeProfile || state.custom.name || '';
+  nameField.readOnly = true;
+  toast('-$50 整套造型重選（不可改名）');
   updateHUD();
 });
 
@@ -2732,29 +2761,77 @@ function update(now){
 // ============================================================
 // PROGRESS PERSISTENCE
 // ============================================================
+// ---- Multi-profile save system ----
+function listProfiles(){
+  try { return JSON.parse(localStorage.getItem('etfm-profiles') || '[]'); }
+  catch(e){ return []; }
+}
+function getActiveProfileName(){ return localStorage.getItem('etfm-active') || ''; }
+function setActiveProfileName(n){ localStorage.setItem('etfm-active', n); }
+function loadProfileData(name){
+  try { return JSON.parse(localStorage.getItem('etfm-profile-' + name) || 'null'); }
+  catch(e){ return null; }
+}
+function saveProfileData(name, data){
+  if (!name) return;
+  localStorage.setItem('etfm-profile-' + name, JSON.stringify(data));
+  const list = listProfiles();
+  if (!list.includes(name)){
+    list.push(name);
+    localStorage.setItem('etfm-profiles', JSON.stringify(list));
+  }
+}
+function deleteProfileData(name){
+  localStorage.removeItem('etfm-profile-' + name);
+  const list = listProfiles().filter(n => n !== name);
+  localStorage.setItem('etfm-profiles', JSON.stringify(list));
+  if (getActiveProfileName() === name) localStorage.removeItem('etfm-active');
+}
+// Migrate the old single-save layout into a profile keyed by its name
+function migrateLegacySave(){
+  if (listProfiles().length > 0) return;
+  let custom = null, progress = null;
+  try { custom   = JSON.parse(localStorage.getItem('etfm-custom')   || 'null'); } catch(e){}
+  try { progress = JSON.parse(localStorage.getItem('etfm-progress') || 'null'); } catch(e){}
+  if (!custom && !progress) return;
+  const name = (custom && custom.name) || '勇者';
+  saveProfileData(name, { custom: custom || {}, progress: progress || {} });
+  setActiveProfileName(name);
+}
+
 function saveProgress(){
-  try {
-    localStorage.setItem('etfm-progress', JSON.stringify({
+  const name = state.activeProfile || (state.custom && state.custom.name);
+  if (!name) return;
+  state.activeProfile = name;
+  saveProfileData(name, {
+    custom: state.custom,
+    progress: {
       money: state.money,
       upgrades: state.upgrades,
       maxDist: state.maxDist,
       wood: state.wood, stone: state.stone, iron: state.iron,
       cosmeticsOwned: state.cosmeticsOwned,
-    }));
-  } catch(e){}
+    },
+  });
 }
 function loadProgress(){
-  try {
-    const data = JSON.parse(localStorage.getItem('etfm-progress') || 'null');
-    if (!data) return;
-    state.money   = data.money   || 0;
-    state.maxDist = data.maxDist || 0;
-    state.wood    = data.wood    || 0;
-    state.stone   = data.stone   || 0;
-    state.iron    = data.iron    || 0;
-    state.cosmeticsOwned = Array.isArray(data.cosmeticsOwned) ? data.cosmeticsOwned : [];
-    Object.assign(state.upgrades, data.upgrades || {});
-  } catch(e){}
+  migrateLegacySave();
+  const name = getActiveProfileName();
+  if (!name) return false;
+  const data = loadProfileData(name);
+  if (!data) return false;
+  state.activeProfile = name;
+  if (data.custom) state.custom = { ...DEFAULT_CUSTOM, ...data.custom,
+    cosmetics: { ...DEFAULT_CUSTOM.cosmetics, ...(data.custom.cosmetics || {}) } };
+  const p = data.progress || {};
+  state.money   = p.money   || 0;
+  state.maxDist = p.maxDist || 0;
+  state.wood    = p.wood    || 0;
+  state.stone   = p.stone   || 0;
+  state.iron    = p.iron    || 0;
+  state.cosmeticsOwned = Array.isArray(p.cosmeticsOwned) ? p.cosmeticsOwned : [];
+  Object.assign(state.upgrades, p.upgrades || {});
+  return true;
 }
 loadProgress();
 
@@ -3501,11 +3578,14 @@ function setMenuMode(on){
 function show(id){ document.getElementById(id).classList.remove('hidden'); }
 function hide(id){ document.getElementById(id).classList.add('hidden'); }
 
-// Load saved customization
-try {
-  const saved = JSON.parse(localStorage.getItem('etfm-custom') || 'null');
-  if (saved) state.custom = { ...DEFAULT_CUSTOM, ...saved };
-} catch(e) {}
+// Load saved customization (legacy — only used if loadProgress hasn't already
+// pulled the active profile, e.g. brand-new player)
+if (!state.activeProfile){
+  try {
+    const saved = JSON.parse(localStorage.getItem('etfm-custom') || 'null');
+    if (saved) state.custom = { ...DEFAULT_CUSTOM, ...saved };
+  } catch(e) {}
+}
 
 setMenuMode(true);
 
@@ -3523,7 +3603,9 @@ for (const field of Object.keys(PALETTES)){
 }
 
 function applyCustomToUI(){
-  document.getElementById('name-input').value = state.custom.name || '';
+  const nameField = document.getElementById('name-input');
+  nameField.value = state.custom.name || '';
+  nameField.readOnly = (state._creatorMode === 'redesign');
   document.querySelectorAll('.swatches').forEach(group => {
     const field = group.dataset.field;
     const val = String(state.custom[field]);
@@ -3547,21 +3629,99 @@ document.querySelectorAll('.swatches').forEach(group => {
   });
 });
 
-// --- Title -> Creator ---
+// --- Title -> Profile picker (or straight to Creator if no profiles yet) ---
 document.getElementById('title-continue').addEventListener('click', () => {
-  getAudioCtx();        // unlock audio context (needs user gesture)
-  startBgm();           // attempt to start BGM if assets/bgm.mp3 exists
+  getAudioCtx();
+  startBgm();
   hide('title-screen');
+  if (listProfiles().length > 0){
+    state.gamePhase = 'profile';
+    show('profile-screen');
+    renderProfileList();
+  } else {
+    state.gamePhase = 'creator';
+    state._creatorMode = 'new';
+    show('creator-screen');
+    applyCustomToUI();
+  }
+});
+
+// --- Profile picker ---
+function renderProfileList(){
+  const list = document.getElementById('profile-list');
+  list.innerHTML = '';
+  const profiles = listProfiles();
+  const activeName = getActiveProfileName();
+  if (profiles.length === 0){
+    list.innerHTML = '<p style="color:#aaa; text-align:center; padding:14px">還沒有角色，點下面按鈕建立</p>';
+    return;
+  }
+  profiles.forEach(name => {
+    const data = loadProfileData(name) || {};
+    const p = data.progress || {};
+    const div = document.createElement('div');
+    div.className = 'profile-row' + (name === activeName ? ' active' : '');
+    div.innerHTML = `
+      <span class="pname">${escapeHtml(name)}</span>
+      <span class="pstats">$${p.money || 0} · 最遠 ${Math.round(p.maxDist || 0)}m</span>
+      <button data-name="${escapeHtml(name)}" data-act="play">▶ 進入</button>
+      <button data-name="${escapeHtml(name)}" data-act="del" class="danger">×</button>
+    `;
+    list.appendChild(div);
+  });
+}
+document.getElementById('profile-list').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-name]');
+  if (!btn) return;
+  const name = btn.dataset.name;
+  if (btn.dataset.act === 'play'){
+    setActiveProfileName(name);
+    location.reload();
+  } else if (btn.dataset.act === 'del'){
+    if (!confirm(`確定要刪除「${name}」？此動作無法復原`)) return;
+    deleteProfileData(name);
+    renderProfileList();
+  }
+});
+document.getElementById('profile-new').addEventListener('click', () => {
+  hide('profile-screen');
+  // Reset state to defaults so creator UI doesn't pre-fill from existing profile
+  state.custom = JSON.parse(JSON.stringify(DEFAULT_CUSTOM));
+  state.money = 0; state.maxDist = 0;
+  state.wood = 0; state.stone = 0; state.iron = 0;
+  state.cosmeticsOwned = [];
+  Object.keys(state.upgrades).forEach(k => state.upgrades[k] = 0);
+  applyStats();
+  state.activeProfile = '';
+  state._creatorMode = 'new';
   show('creator-screen');
   state.gamePhase = 'creator';
   applyCustomToUI();
 });
+document.getElementById('profile-back').addEventListener('click', () => {
+  hide('profile-screen');
+  show('title-screen');
+  state.gamePhase = 'title';
+});
 
 // --- Creator -> Tutorial / Play ---
 document.getElementById('start-game').addEventListener('click', () => {
-  const name = document.getElementById('name-input').value.trim() || '勇者';
-  state.custom.name = name;
-  localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
+  const typed = document.getElementById('name-input').value.trim() || '勇者';
+  if (state._creatorMode === 'new'){
+    // New profile: name from input creates a fresh slot
+    if (listProfiles().includes(typed)){
+      if (!confirm(`「${typed}」已經有存檔，確定要覆蓋？`)) return;
+      deleteProfileData(typed);
+    }
+    state.activeProfile = typed;
+    setActiveProfileName(typed);
+  } else if (state._creatorMode === 'redesign'){
+    // Redesign keeps the active profile name regardless of input
+    if (state.activeProfile) state.custom.name = state.activeProfile;
+  }
+  state.custom.name = state._creatorMode === 'redesign' ? state.activeProfile : typed;
+  state._creatorMode = null;
+  saveProgress();
   buildPlayer(state.custom);
   refreshPlayerList();
   if (mpSocket && mpSocket.readyState === WebSocket.OPEN) mpSendIdentify();
@@ -3588,9 +3748,14 @@ document.getElementById('reset-step2').addEventListener('click', () => {
 document.getElementById('reset-final-cancel').addEventListener('click', () => hide('reset-final-screen'));
 document.getElementById('reset-final-confirm').addEventListener('click', () => {
   try {
+    // Delete only the current profile (other profiles remain)
+    const name = state.activeProfile || getActiveProfileName();
+    if (name) deleteProfileData(name);
+    localStorage.removeItem('etfm-active');
+    localStorage.removeItem('etfm-tutorial');
+    // Also wipe legacy single-save keys if they're somehow still around
     localStorage.removeItem('etfm-progress');
     localStorage.removeItem('etfm-custom');
-    localStorage.removeItem('etfm-tutorial');
   } catch(e){}
   location.reload();
 });
