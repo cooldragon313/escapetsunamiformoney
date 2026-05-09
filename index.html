@@ -726,15 +726,19 @@ function _floorBuild(color, lineColor, lineSpacing){
   }
   return g;
 }
-function _wallsBuild(color){
+function _wallsBuild(color, matOpts){
   const g = new THREE.Group();
   const H = 4, T = 0.4, S = 12;
-  const fL = mk(4.5, H, T, color); fL.position.set(-3.5, H/2, -S/2); g.add(fL);
-  const fR = mk(4.5, H, T, color); fR.position.set( 3.5, H/2, -S/2); g.add(fR);
-  const dh = mk(3, 0.5, T, color); dh.position.set(0, H - 0.25, -S/2); g.add(dh);   // door header
-  const back  = mk(S,  H, T, color); back.position.set( 0, H/2, S/2); g.add(back);
-  const left  = mk(T,  H, S, color); left.position.set(-S/2, H/2, 0); g.add(left);
-  const right = mk(T,  H, S, color); right.position.set( S/2, H/2, 0); g.add(right);
+  const make = (w,h,d) => new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshLambertMaterial({ color, ...(matOpts || {}) })
+  );
+  const fL = make(4.5, H, T); fL.position.set(-3.5, H/2, -S/2); g.add(fL);
+  const fR = make(4.5, H, T); fR.position.set( 3.5, H/2, -S/2); g.add(fR);
+  const dh = make(3, 0.5, T); dh.position.set(0, H - 0.25, -S/2); g.add(dh);
+  const back  = make(S,  H, T); back.position.set( 0, H/2, S/2); g.add(back);
+  const left  = make(T,  H, S); left.position.set(-S/2, H/2, 0); g.add(left);
+  const right = make(T,  H, S); right.position.set( S/2, H/2, 0); g.add(right);
   return g;
 }
 function _roofFlat(color){
@@ -759,11 +763,22 @@ const BUILD_ITEMS = {
     { id:'wood',  name:'木牆', price:300,  mats:{wood:15},  build: () => _wallsBuild(0x8B5A2B) },
     { id:'stone', name:'石牆', price:600,  mats:{stone:15}, build: () => _wallsBuild(0x888888) },
     { id:'iron',  name:'鐵牆', price:1200, mats:{iron:10},  build: () => _wallsBuild(0xbbbbcc) },
+    { id:'glass', name:'玻璃牆', price:900, mats:{stone:5, iron:3},
+      build: () => _wallsBuild(0xaaccff, {transparent:true, opacity:0.45}) },
   ],
   roof: [
     { id:'flat',    name:'平頂',     price:200, mats:{wood:8},  build: () => _roofFlat(0x6a5a4a) },
     { id:'pitched', name:'斜頂(紅瓦)', price:400, mats:{stone:8}, build: () => _roofPitched(0x8B0000) },
     { id:'pitched_blue', name:'斜頂(藍)', price:400, mats:{wood:10}, build: () => _roofPitched(0x4488cc) },
+    { id:'glass_dome', name:'玻璃圓頂', price:1500, mats:{iron:5, stone:5}, build: () => {
+      const g = new THREE.Group();
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(7, 12, 8, 0, Math.PI*2, 0, Math.PI/2),
+        new THREE.MeshLambertMaterial({color:0xaaccff, transparent:true, opacity:0.45})
+      );
+      dome.position.y = 4; g.add(dome);
+      return g;
+    }},
   ],
   furniture: [
     { id:'bed', name:'床', price:150, mats:{wood:5}, build: () => {
@@ -884,10 +899,44 @@ function refreshPlotVisual(plot){
 const showPlotSign = refreshPlotVisual;
 
 // ============================================================
-// COINS
+// COINS — disc / stack / money-bag visual based on value
 // ============================================================
-const coinGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-const coinMat = new THREE.MeshLambertMaterial({ color: 0xffd700 });
+const coinDiscGeo  = new THREE.CylinderGeometry(0.32, 0.32, 0.08, 16);
+const coinGoldMat  = new THREE.MeshLambertMaterial({ color: 0xffd700 });
+const coinEdgeMat  = new THREE.MeshLambertMaterial({ color: 0xb8860b });
+function makeCoinMesh(value){
+  const v = Math.max(1, value || 1);
+  const g = new THREE.Group();
+  if (v >= 10){
+    // Money pouch (Σ value 10+)
+    const bag = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55, 14, 10),
+      new THREE.MeshLambertMaterial({color: 0x8B4513})
+    );
+    bag.scale.y = 0.85;
+    bag.position.y = 0.45;
+    g.add(bag);
+    const tie = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.16, 0.22, 0.22, 8),
+      new THREE.MeshLambertMaterial({color: 0x6a3a1a})
+    );
+    tie.position.y = 0.95;
+    g.add(tie);
+    // Gold $ symbol
+    const dollar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.04), coinGoldMat);
+    dollar.position.set(0, 0.5, 0.55);
+    g.add(dollar);
+  } else {
+    // Stack of disc coins; height ≈ value
+    const n = Math.min(v, 9);
+    for (let i = 0; i < n; i++){
+      const disc = new THREE.Mesh(coinDiscGeo, coinGoldMat);
+      disc.position.y = 0.05 + i * 0.10;
+      g.add(disc);
+    }
+  }
+  return g;
+}
 const coins = [];
 
 function spawnInitialCoins(){
@@ -897,18 +946,18 @@ function spawnInitialCoins(){
     const count  = 14 + zone * 10;
     const value  = 1 + zone;
     for (let i = 0; i < count; i++){
-      const c = new THREE.Mesh(coinGeo, coinMat);
+      const c = makeCoinMesh(value);
       const x = (Math.random() * 2 - 1) * (RUNWAY_HALF_W - 1);
       const z = zStart - Math.random() * (zStart - zEnd);
-      c.position.set(x, 0.7, z);
+      c.position.set(x, 0.4, z);
       scene.add(c);
       coins.push({ mesh:c, x, z, value, collected:false, dropped:false });
     }
   }
 }
 function addCoinFromServer(sc){
-  const m = new THREE.Mesh(coinGeo, coinMat);
-  m.position.set(sc.x, 0.7, sc.z);
+  const m = makeCoinMesh(sc.value);
+  m.position.set(sc.x, 0.4, sc.z);
   scene.add(m);
   coins.push({ id: sc.id, mesh: m, x: sc.x, z: sc.z, value: sc.value, collected: false, dropped: false, attempting: false });
 }
@@ -926,10 +975,19 @@ function makeChestMesh(){
   );
 }
 function addChestFromServer(c){
+  const g = new THREE.Group();
+  g.position.set(c.x, 0, c.z);
   const m = makeChestMesh();
-  m.position.set(c.x, 0.6, c.z);
-  scene.add(m);
-  chests.push({ id: c.id, mesh: m, x: c.x, z: c.z, value: c.value, slots: c.slots,
+  m.position.y = 0.6;
+  g.add(m);
+  if (c.ownerName){
+    const label = makeNameLabel(`${c.ownerName} 的遺留物`);
+    label.scale.set(3.0, 0.75, 1);
+    label.position.y = 1.9;
+    g.add(label);
+  }
+  scene.add(g);
+  chests.push({ id: c.id, mesh: g, x: c.x, z: c.z, value: c.value, slots: c.slots,
                 ownerName: c.ownerName || '', collected: false, attempting: false });
 }
 function clearAllChests(){
@@ -942,10 +1000,10 @@ function scatterSpilloverCoins(cx, cz, count, totalValue){
   for (let i = 0; i < count; i++){
     const value = (i === count - 1) ? valueLeft : perCoin;
     valueLeft -= perCoin;
-    const m = new THREE.Mesh(coinGeo, coinMat);
+    const m = makeCoinMesh(value);
     const x = cx + (Math.random() - 0.5) * 4;
     const z = cz + (Math.random() - 0.5) * 4;
-    m.position.set(x, 0.7, z);
+    m.position.set(x, 0.4, z);
     scene.add(m);
     coins.push({ id: 'spill_' + Math.random().toString(36).slice(2,8), mesh: m, x, z, value,
                  collected: false, dropped: false, attempting: false, spillover: true });
@@ -1668,9 +1726,50 @@ const state = {
   stormBonusMultiplier: 1,
 };
 
-// Random material drop on coin pickup. Shallow zones favour wood,
-// mid favour stone, deep favour iron.
-function rollMaterialDrop(coinValue){
+// Material 3D models — distinct shape & colour per type
+function makeMaterialMesh(type){
+  if (type === 'wood'){
+    const m = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.18, 1.2, 8),
+      new THREE.MeshLambertMaterial({color: 0x8B4513})
+    );
+    m.rotation.z = Math.PI / 2;   // lay log on its side
+    return m;
+  }
+  if (type === 'stone'){
+    const m = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.36, 0),
+      new THREE.MeshLambertMaterial({color: 0x888888, flatShading: true})
+    );
+    m.rotation.set(Math.random(), Math.random(), Math.random());
+    return m;
+  }
+  // iron ingot
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 0.22, 0.32),
+    new THREE.MeshLambertMaterial({color: 0x556677})
+  );
+  return m;
+}
+function spawnMaterialFlair(type, x, z){
+  const m = makeMaterialMesh(type);
+  m.position.set(x, 0.5, z);
+  scene.add(m);
+  const start = performance.now();
+  function step(){
+    const e = (performance.now() - start) / 1000;
+    if (e > 1.5){ scene.remove(m); return; }
+    m.position.y = 0.5 + e * 1.5;
+    m.rotation.y += 0.08;
+    if (m.material) m.material.opacity = Math.max(0, 1 - e * 0.7);
+    requestAnimationFrame(step);
+  }
+  if (m.material){ m.material.transparent = true; }
+  step();
+}
+
+// Random material drop on coin pickup.
+function rollMaterialDrop(coinValue, x, z){
   if (Math.random() >= 0.07) return;
   const zone = Math.max(0, Math.min(9, (coinValue || 1) - 1));   // value 1 = zone 0
   const r = Math.random();
@@ -1682,6 +1781,7 @@ function rollMaterialDrop(coinValue){
   saveProgress();
   const label = mat === 'wood' ? '🪵 木頭' : mat === 'stone' ? '🪨 石頭' : '⚙️ 鐵';
   toast(`+1 ${label}`);
+  if (x !== undefined && z !== undefined) spawnMaterialFlair(mat, x, z);
 }
 
 function applyBuff(type){
@@ -2086,12 +2186,19 @@ function killPlayer(){
         value: state.bagValue, slots: state.bag,
       }));
     } else {
-      // Local fallback: drop a single chest as a coin entry (legacy)
+      // Local fallback: drop chest with owner-name label (legacy)
+      const dropGroup = new THREE.Group();
+      dropGroup.position.set(player.position.x, 0, player.position.z);
       const drop = makeChestMesh();
-      drop.position.set(player.position.x, 0.6, player.position.z);
-      scene.add(drop);
+      drop.position.y = 0.6;
+      dropGroup.add(drop);
+      const label = makeNameLabel(`${state.custom?.name || '我'} 的遺留物`);
+      label.scale.set(3.0, 0.75, 1);
+      label.position.y = 1.9;
+      dropGroup.add(label);
+      scene.add(dropGroup);
       coins.push({
-        mesh: drop, x: drop.position.x, z: drop.position.z,
+        mesh: dropGroup, x: player.position.x, z: player.position.z,
         value: state.bagValue, collected: false, dropped: true,
         slots: state.bag,
       });
@@ -2249,7 +2356,7 @@ function update(now){
           c.collected = true;
           scene.remove(c.mesh);
           sfx.coin();
-          rollMaterialDrop(c.value);
+          rollMaterialDrop(c.value, c.x, c.z);
         }
       }
     }
@@ -2402,7 +2509,7 @@ function update(now){
       let n = 0;
       for (const c of coins){
         if (c.collected && !c.dropped){
-          c.mesh.position.set(c.x, 0.7, c.z);
+          c.mesh.position.set(c.x, 0.4, c.z);
           scene.add(c.mesh);
           c.collected = false;
           n++;
@@ -2531,7 +2638,7 @@ function update(now){
       c.mesh.position.y = 0.5 + Math.sin(t * 4) * 0.15;
     } else {
       c.mesh.rotation.y = t * 2 + c.x * 0.3;
-      c.mesh.position.y = 0.7 + Math.sin(t * 3 + c.x) * 0.12;
+      c.mesh.position.y = 0.4 + Math.sin(t * 3 + c.x) * 0.12;
     }
   }
 
@@ -3042,7 +3149,7 @@ function mpHandleMessage(raw){
       state.bag += 1;
       state.bagValue += (msg.value ?? c.value) * lootMul;
       sfx.coin();
-      rollMaterialDrop(msg.value ?? c.value);
+      rollMaterialDrop(msg.value ?? c.value, c.x, c.z);
     } else if (msg.byName){
       // brief feedback so the other player isn't invisible
       // (only when they grab one near you — skipped here to avoid toast spam)
@@ -3053,7 +3160,7 @@ function mpHandleMessage(raw){
       c.collected = false;
       c.attempting = false;
       if (c.mesh){
-        c.mesh.position.set(c.x, 0.7, c.z);
+        c.mesh.position.set(c.x, 0.4, c.z);
         scene.add(c.mesh);
       }
     }
