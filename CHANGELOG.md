@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 新（Phase 1A 多人連線）
+- **PartyKit server**（`party/server.js`）做位置中繼，所有玩家共用一個 `global` 房間
+- 看得到其他玩家：客戶端建出他人的角色模型（套他們選的造型），頭上有名牌
+- 進場 / 離場 toast，內插平滑移動，斷線後 5 秒自動重連
+- `PARTYKIT_HOST` 留空 = 單人模式；填入 deploy 後的網址 = 多人模式
+- 同步資料：位置、Y 軸轉向、移動 / 蹲坑 flag、名字、整套造型
+
 ### 新
 - **開場故事畫面** + 「ESCAPE TSUNAMI / FOR MONEY」標題，鋪陳遠處寶藏的傳說
 - **角色創建**：名字 / 髮型（短/帽/尖刺）/ 髮色 / 表情（笑/嚴肅）/ 膚色 / 上衣 / 褲子 / 鞋子；選擇透過 localStorage 儲存

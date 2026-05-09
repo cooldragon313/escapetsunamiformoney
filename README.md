@@ -108,9 +108,56 @@
 
 詳見 [CHANGELOG.md](CHANGELOG.md)。
 
+## 多人連線（PartyKit）
+
+伺服器使用 [PartyKit](https://www.partykit.io/)（Cloudflare 邊緣節點）。
+每個房間是一個 Durable Object，玩家之間透過 WebSocket 中繼位置。
+
+### 部署步驟（一次性）
+
+```bash
+# 1. 安裝依賴
+npm install
+
+# 2. 第一次登入（會開瀏覽器走 GitHub OAuth）
+npx partykit login
+
+# 3. 部署 server，會印出像 https://etfm.<你的帳號>.partykit.dev
+npm run deploy
+```
+
+把 deploy 後的網址（不含 `https://`）貼到 `index.html` 開頭：
+
+```js
+const PARTYKIT_HOST = 'etfm.<你的帳號>.partykit.dev';
+```
+
+然後 `git push` 到 GitHub Pages。所有玩家會共用同一個房間 (`global`)。
+
+### 本機開發
+
+```bash
+npm run dev
+```
+
+會在 `localhost:1999` 啟動。把 `PARTYKIT_HOST = 'localhost:1999'` 設好，
+直接打開 `index.html`（瀏覽器） 就能測試多人。
+
+### 目前實作（Phase 1A）
+
+- 看到其他玩家在同一世界跑，含名字標籤
+- 跑步腳擺動、轉身會同步
+- 進場 / 離場 toast 提示
+
+### 還沒做的多人功能
+
+- 同一條海嘯（目前各自的海嘯獨立）
+- 金幣搶先撿（race condition）
+- 基地交易、聊天
+
 ## 路線圖（未做）
 
-- 多人連線（同伺服器、共享海嘯、基地交易）
+- Phase 1B：海嘯與金幣移到 server，所有玩家共享
 - 基地分區擴建（商店區 / 自家空地 / 廣場）
 - 道具收集 + 建造系統（被動賺錢建築）
 - 音效 / BGM

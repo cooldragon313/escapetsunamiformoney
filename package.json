@@ -1,0 +1,13 @@
+{
+  "name": "tsunami-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Escape Tsunami For Money — multiplayer voxel runner",
+  "scripts": {
+    "dev": "partykit dev",
+    "deploy": "partykit deploy"
+  },
+  "devDependencies": {
+    "partykit": "*"
+  }
+}

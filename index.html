@@ -284,6 +284,12 @@
 // ============================================================
 // CONFIG
 // ============================================================
+// Multiplayer (PartyKit). Leave empty to play solo. After running
+// `npx partykit deploy`, copy the host (no protocol, no path) here, e.g.
+// 'etfm.cooldragon313.partykit.dev'. For local dev: 'localhost:1999'.
+const PARTYKIT_HOST = '';
+const MP_ROOM = 'global';
+
 const RUNWAY_LEN     = 1000;
 const RUNWAY_HALF_W  = 20;          // 40 person-widths total
 const ZONE_LEN       = 200;
@@ -519,49 +525,47 @@ const DEFAULT_CUSTOM = {
   skin: 0xf0c090, shirt: 0xd04040, pants: 0x1a1a4a, shoes: 0x5a3a1a,
 };
 
-function buildPlayer(custom){
+function buildAvatar(custom){
   custom = custom || DEFAULT_CUSTOM;
-  if (player) scene.remove(player);
-  player = new THREE.Group();
-  // Torso
-  const torso = mk(1.2, 1.3, 0.7, custom.shirt); torso.position.y = 1.55; player.add(torso);
-  // Head
-  const head = mk(0.9, 0.9, 0.9, custom.skin); head.position.y = 2.65; player.add(head);
-  // Face features (front of head is -z; default rotation has player facing -z)
-  const eyeL = mk(0.14, 0.14, 0.05, 0x000000); eyeL.position.set(-0.2, 2.72, -0.46); player.add(eyeL);
-  const eyeR = mk(0.14, 0.14, 0.05, 0x000000); eyeR.position.set( 0.2, 2.72, -0.46); player.add(eyeR);
+  const g = new THREE.Group();
+  const torso = mk(1.2, 1.3, 0.7, custom.shirt); torso.position.y = 1.55; g.add(torso);
+  const head  = mk(0.9, 0.9, 0.9, custom.skin); head.position.y = 2.65; g.add(head);
+  const eyeL  = mk(0.14, 0.14, 0.05, 0x000000); eyeL.position.set(-0.2, 2.72, -0.46); g.add(eyeL);
+  const eyeR  = mk(0.14, 0.14, 0.05, 0x000000); eyeR.position.set( 0.2, 2.72, -0.46); g.add(eyeR);
   if (custom.expression === 'smile'){
-    const m  = mk(0.40, 0.07, 0.05, 0xaa3030); m.position.set(0, 2.46, -0.46); player.add(m);
-    const cl = mk(0.07, 0.12, 0.05, 0xaa3030); cl.position.set(-0.21, 2.40, -0.46); player.add(cl);
-    const cr = mk(0.07, 0.12, 0.05, 0xaa3030); cr.position.set( 0.21, 2.40, -0.46); player.add(cr);
+    const m  = mk(0.40, 0.07, 0.05, 0xaa3030); m.position.set(0, 2.46, -0.46); g.add(m);
+    const cl = mk(0.07, 0.12, 0.05, 0xaa3030); cl.position.set(-0.21, 2.40, -0.46); g.add(cl);
+    const cr = mk(0.07, 0.12, 0.05, 0xaa3030); cr.position.set( 0.21, 2.40, -0.46); g.add(cr);
   } else {
-    const m = mk(0.34, 0.07, 0.05, 0x222222); m.position.set(0, 2.42, -0.46); player.add(m);
+    const m = mk(0.34, 0.07, 0.05, 0x222222); m.position.set(0, 2.42, -0.46); g.add(m);
   }
-  // Hair
   if (custom.hair === 'short'){
-    const h = mk(0.95, 0.4, 0.95, custom.hairColor); h.position.y = 2.95; player.add(h);
+    const h = mk(0.95, 0.4, 0.95, custom.hairColor); h.position.y = 2.95; g.add(h);
   } else if (custom.hair === 'cap'){
-    const cap  = mk(1.0, 0.4, 1.0, custom.hairColor); cap.position.y = 2.95; player.add(cap);
-    const brim = mk(1.2, 0.1, 0.6, custom.hairColor); brim.position.set(0, 2.83, -0.5); player.add(brim);
+    const cap  = mk(1.0, 0.4, 1.0, custom.hairColor); cap.position.y = 2.95; g.add(cap);
+    const brim = mk(1.2, 0.1, 0.6, custom.hairColor); brim.position.set(0, 2.83, -0.5); g.add(brim);
   } else if (custom.hair === 'spiky'){
-    const base = mk(0.92, 0.2, 0.92, custom.hairColor); base.position.y = 2.85; player.add(base);
+    const base = mk(0.92, 0.2, 0.92, custom.hairColor); base.position.y = 2.85; g.add(base);
     for (let i = -1; i <= 1; i++){
       const sp = mk(0.22, 0.5, 0.22, custom.hairColor);
-      sp.position.set(i * 0.32, 3.2, 0); player.add(sp);
+      sp.position.set(i * 0.32, 3.2, 0); g.add(sp);
     }
   }
-  // Legs
-  legL = mk(0.45, 1, 0.55, custom.pants); legL.position.set(-0.32, 0.5, 0); player.add(legL);
-  legR = mk(0.45, 1, 0.55, custom.pants); legR.position.set( 0.32, 0.5, 0); player.add(legR);
-  // Arms (skin-coloured)
-  armL = mk(0.35, 1.0, 0.4, custom.skin); armL.position.set(-0.78, 1.6, 0); player.add(armL);
-  armR = mk(0.35, 1.0, 0.4, custom.skin); armR.position.set( 0.78, 1.6, 0); player.add(armR);
-  // Shoes
-  const shoeL = mk(0.5, 0.18, 0.7, custom.shoes); shoeL.position.set(-0.32, 0.09, 0.05); player.add(shoeL);
-  const shoeR = mk(0.5, 0.18, 0.7, custom.shoes); shoeR.position.set( 0.32, 0.09, 0.05); player.add(shoeR);
-  // Backpack
-  const pack = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); player.add(pack);
+  const lL = mk(0.45, 1, 0.55, custom.pants); lL.position.set(-0.32, 0.5, 0); g.add(lL);
+  const lR = mk(0.45, 1, 0.55, custom.pants); lR.position.set( 0.32, 0.5, 0); g.add(lR);
+  const aL = mk(0.35, 1.0, 0.4, custom.skin); aL.position.set(-0.78, 1.6, 0); g.add(aL);
+  const aR = mk(0.35, 1.0, 0.4, custom.skin); aR.position.set( 0.78, 1.6, 0); g.add(aR);
+  const shoeL = mk(0.5, 0.18, 0.7, custom.shoes); shoeL.position.set(-0.32, 0.09, 0.05); g.add(shoeL);
+  const shoeR = mk(0.5, 0.18, 0.7, custom.shoes); shoeR.position.set( 0.32, 0.09, 0.05); g.add(shoeR);
+  const pack  = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); g.add(pack);
+  return { group: g, legL: lL, legR: lR, armL: aL, armR: aR };
+}
 
+function buildPlayer(custom){
+  if (player) scene.remove(player);
+  const built = buildAvatar(custom || DEFAULT_CUSTOM);
+  player = built.group;
+  legL = built.legL; legR = built.legR; armL = built.armL; armR = built.armR;
   player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
   scene.add(player);
 }
@@ -1159,6 +1163,7 @@ function update(now){
     keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']||
     Math.abs(touchInput.jx) > 0.12 || Math.abs(touchInput.jy) > 0.12
   );
+  state._moving = moving;
   if (moving){
     const swing = Math.sin(t * 14);
     legL.rotation.x =  swing * 0.6;
@@ -1198,6 +1203,9 @@ function update(now){
   camera.position.z += (camTargetZ - camera.position.z) * 0.1;
   camera.lookAt(player.position.x, player.position.y + 1.5, player.position.z - 5);
 
+  // Multiplayer (interpolate others + send our state)
+  tickMultiplayer(dt);
+
   if (state.gamePhase === 'playing') updateHUD();
   renderer.render(scene, camera);
   requestAnimationFrame(update);
@@ -1230,6 +1238,181 @@ updateHUD();
 
 // Save on tab close / refresh as a safety net
 window.addEventListener('beforeunload', saveProgress);
+
+// ============================================================
+// MULTIPLAYER (PartyKit)
+// ============================================================
+const otherPlayers = new Map();   // id -> { group, legL/R, armL/R, label, target, custom, name }
+let mpSocket = null;
+let mpMyId = null;
+let mpSendAccum = 0;
+
+function makeNameLabel(name){
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ffd700';
+  ctx.font = 'bold 36px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(name || '???').slice(0, 16), canvas.width/2, canvas.height/2 + 2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, fog: false }));
+  sprite.scale.set(3.6, 0.9, 1);
+  return sprite;
+}
+
+function spawnOtherPlayer(p){
+  const built = buildAvatar(p.custom);
+  const label = makeNameLabel(p.name);
+  label.position.set(0, 4.2, 0);
+  built.group.add(label);
+  built.group.position.set(p.x ?? 0, p.y ?? 0, p.z ?? 8);
+  built.group.rotation.y = p.ry ?? 0;
+  scene.add(built.group);
+  otherPlayers.set(p.id, {
+    ...built, label,
+    name: p.name, custom: p.custom,
+    target: { x: p.x ?? 0, y: p.y ?? 0, z: p.z ?? 8, ry: p.ry ?? 0 },
+    moving: false, inPit: false,
+  });
+}
+
+function rebuildOtherAvatar(o, p){
+  // Replace mesh with new custom while keeping target position
+  if (!o) return;
+  const oldGroup = o.group;
+  const built = buildAvatar(p.custom);
+  built.group.position.copy(oldGroup.position);
+  built.group.rotation.y = oldGroup.rotation.y;
+  // re-attach name label
+  const label = makeNameLabel(p.name);
+  label.position.set(0, 4.2, 0);
+  built.group.add(label);
+  scene.add(built.group);
+  scene.remove(oldGroup);
+  o.group = built.group;
+  o.legL = built.legL; o.legR = built.legR;
+  o.armL = built.armL; o.armR = built.armR;
+  o.label = label;
+  o.name = p.name;
+  o.custom = p.custom;
+}
+
+function removeOtherPlayer(id){
+  const o = otherPlayers.get(id);
+  if (!o) return;
+  scene.remove(o.group);
+  otherPlayers.delete(id);
+}
+
+function mpSendIdentify(){
+  if (!mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
+  mpSocket.send(JSON.stringify({
+    type: 'identify',
+    name: state.custom.name,
+    custom: state.custom,
+  }));
+}
+
+function mpSendState(){
+  if (!mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
+  mpSocket.send(JSON.stringify({
+    type: 'state',
+    x: player.position.x, y: player.position.y, z: player.position.z,
+    ry: player.rotation.y,
+    moving: !!state._moving,
+    inPit: !!state.inPit,
+  }));
+}
+
+function mpHandleMessage(raw){
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (msg.type === 'init'){
+    mpMyId = msg.yourId;
+    msg.players.forEach(p => { if (p.id !== mpMyId) spawnOtherPlayer(p); });
+    toast(`連線成功（線上 ${msg.players.length} 人）`);
+  } else if (msg.type === 'join'){
+    if (msg.player.id === mpMyId) return;
+    spawnOtherPlayer(msg.player);
+    toast(`${msg.player.name || '某人'} 進入世界`);
+  } else if (msg.type === 'leave'){
+    const o = otherPlayers.get(msg.id);
+    if (o && o.name) toast(`${o.name} 離開了`);
+    removeOtherPlayer(msg.id);
+  } else if (msg.type === 'state'){
+    if (msg.id === mpMyId) return;
+    const o = otherPlayers.get(msg.id);
+    if (!o) return;
+    o.target.x = msg.x; o.target.y = msg.y; o.target.z = msg.z; o.target.ry = msg.ry;
+    o.moving = !!msg.moving;
+    o.inPit  = !!msg.inPit;
+  } else if (msg.type === 'identify'){
+    if (msg.id === mpMyId) return;
+    const o = otherPlayers.get(msg.id);
+    if (o) rebuildOtherAvatar(o, { id: msg.id, name: msg.name, custom: msg.custom });
+  }
+}
+
+function mpConnect(){
+  if (!PARTYKIT_HOST) return;          // solo mode
+  if (mpSocket) return;
+  const isLocal = PARTYKIT_HOST.startsWith('localhost');
+  const proto = isLocal ? 'ws' : 'wss';
+  const url = `${proto}://${PARTYKIT_HOST}/parties/main/${MP_ROOM}`;
+  try {
+    mpSocket = new WebSocket(url);
+  } catch (e){
+    console.warn('PartyKit connect failed', e);
+    return;
+  }
+  mpSocket.addEventListener('open',  () => mpSendIdentify());
+  mpSocket.addEventListener('message', e => mpHandleMessage(e.data));
+  mpSocket.addEventListener('close', () => {
+    mpSocket = null;
+    // Clean up other players' meshes
+    for (const id of Array.from(otherPlayers.keys())) removeOtherPlayer(id);
+    toast('連線中斷，5 秒後重試');
+    setTimeout(mpConnect, 5000);
+  });
+  mpSocket.addEventListener('error', () => { /* close handler will retry */ });
+}
+
+function tickMultiplayer(dt){
+  // Smoothly interpolate other players toward their last reported state
+  for (const o of otherPlayers.values()){
+    o.group.position.x += (o.target.x - o.group.position.x) * 0.22;
+    o.group.position.y += (o.target.y - o.group.position.y) * 0.22;
+    o.group.position.z += (o.target.z - o.group.position.z) * 0.22;
+    let dr = o.target.ry - o.group.rotation.y;
+    while (dr > Math.PI)  dr -= 2 * Math.PI;
+    while (dr < -Math.PI) dr += 2 * Math.PI;
+    o.group.rotation.y += dr * 0.22;
+    // Animate legs/arms when moving
+    if (o.moving && !o.inPit){
+      const sw = Math.sin(t * 14);
+      o.legL.rotation.x =  sw * 0.6;
+      o.legR.rotation.x = -sw * 0.6;
+      o.armL.rotation.x = -sw * 0.4;
+      o.armR.rotation.x =  sw * 0.4;
+    } else {
+      o.legL.rotation.x *= 0.85;
+      o.legR.rotation.x *= 0.85;
+      o.armL.rotation.x *= 0.85;
+      o.armR.rotation.x *= 0.85;
+    }
+  }
+  // Throttled state send (10 Hz)
+  mpSendAccum += dt;
+  if (mpSendAccum >= 0.1){
+    mpSendAccum = 0;
+    if (state.gamePhase === 'playing') mpSendState();
+  }
+}
 
 // ============================================================
 // MENUS: title / character creator / tutorial
@@ -1326,6 +1509,7 @@ document.getElementById('start-game').addEventListener('click', () => {
     show('tutorial-screen');
     renderTutorialStep();
   }
+  mpConnect();
 });
 
 // --- Tutorial ---
