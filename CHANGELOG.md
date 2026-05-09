@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 新
+- **重置進度按鈕**：角色創建畫面底部紅色虛線「⚠ 重置所有進度」連結，按下後彈出第一個紅色確認窗 → 再彈第二個深紅色「最後確認」窗 → 才會清掉 localStorage 並重新載入。雙保險防誤觸。
+
 ### 新（Phase 1A 多人連線）
 - **多人連線正式啟用**：`PARTYKIT_HOST` 設為 `etfm.cooldragon313.partykit.dev`
 - **PartyKit server**（`party/server.js`）做位置中繼，所有玩家共用一個 `global` 房間

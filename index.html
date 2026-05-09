@@ -222,6 +222,46 @@
       <div class="swatches" data-field="shoes"></div>
     </div>
     <button id="start-game">▶ 進入大海嘯之國</button>
+    <button id="reset-btn" type="button"
+            style="margin: 28px auto 0; padding: 6px 18px; font-size: 12px;
+                   background: transparent; color: #aa6666;
+                   border: 1px dashed #aa4444; letter-spacing: 2px;">
+      ⚠ 重置所有進度
+    </button>
+  </div>
+</div>
+
+<!-- Step 1: red confirm -->
+<div id="reset-screen" class="overlay hidden">
+  <div class="overlay-card" style="border-color: #c62828; box-shadow: 0 0 40px rgba(198,40,40,0.5);">
+    <h2 style="color: #ff5555; letter-spacing: 4px;">⚠ 重 置 確 認</h2>
+    <p style="color: #fff; margin-top: 16px;">這會清除：</p>
+    <ul style="color: #ffaaaa; line-height: 2; padding-left: 20px;">
+      <li>金錢餘額與所有 5 種升級等級</li>
+      <li>最遠距離紀錄</li>
+      <li>名字與角色造型</li>
+      <li>新手教學旗標（會再次顯示）</li>
+    </ul>
+    <p style="color: #ff8888; text-align: center; margin-top: 16px;"><strong>此動作無法復原。</strong></p>
+    <div style="display: flex; gap: 12px; margin-top: 24px;">
+      <button id="reset-cancel" style="background: #555; border-color: #888; flex: 2;">取消</button>
+      <button id="reset-step2" style="background: #c62828; border-color: #ff5050; flex: 1; font-size: 14px;">繼續…</button>
+    </div>
+  </div>
+</div>
+
+<!-- Step 2: deep red final confirm -->
+<div id="reset-final-screen" class="overlay hidden">
+  <div class="overlay-card" style="border-color: #ff0000; background: rgba(60,0,0,0.96); box-shadow: 0 0 60px rgba(255,0,0,0.6);">
+    <h2 style="color: #ff3030; letter-spacing: 8px;">最 後 確 認</h2>
+    <p style="text-align: center; color: #ffcccc; font-size: 18px; margin: 28px 0; line-height: 1.8;">
+      真的、真的要清除嗎？<br>
+      所有累積的成果會立即消失。
+    </p>
+    <div style="display: flex; gap: 12px;">
+      <button id="reset-final-cancel" style="background: #555; border-color: #aaa; flex: 3;">取消，保留進度</button>
+      <button id="reset-final-confirm" style="background: #b71c1c; border-color: #ff5050; flex: 1; font-size: 12px;">是，重置</button>
+    </div>
   </div>
 </div>
 
@@ -1510,6 +1550,23 @@ document.getElementById('start-game').addEventListener('click', () => {
     renderTutorialStep();
   }
   mpConnect();
+});
+
+// --- Reset progress (two-step confirm) ---
+document.getElementById('reset-btn').addEventListener('click', () => show('reset-screen'));
+document.getElementById('reset-cancel').addEventListener('click', () => hide('reset-screen'));
+document.getElementById('reset-step2').addEventListener('click', () => {
+  hide('reset-screen');
+  show('reset-final-screen');
+});
+document.getElementById('reset-final-cancel').addEventListener('click', () => hide('reset-final-screen'));
+document.getElementById('reset-final-confirm').addEventListener('click', () => {
+  try {
+    localStorage.removeItem('etfm-progress');
+    localStorage.removeItem('etfm-custom');
+    localStorage.removeItem('etfm-tutorial');
+  } catch(e){}
+  location.reload();
 });
 
 // --- Tutorial ---
