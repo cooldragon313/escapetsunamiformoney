@@ -436,7 +436,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 scene.fog = new THREE.Fog(0x87ceeb, 200, 4000);
 
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1500);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 3000);
 camera.position.set(0, 6, BASE_Z + 2);
 camera.lookAt(0, 1, 0);
 
@@ -2063,6 +2063,14 @@ function mpHandleMessage(raw){
       toast('Server 為舊版，金幣/海嘯改本地生成');
     }
     toast(`連線成功（線上 ${msg.players.length} 人）`);
+    // Diagnostic: helps spot whether server is running the latest code
+    setTimeout(() => {
+      const c = (msg.coins || []).length;
+      const p = (msg.powerups || []).length;
+      const ch = (msg.chests || []).length;
+      const bt = msg.bigTreasure ? 'YES' : 'no';
+      toast(`收到：金幣 ${c} / 道具 ${p} / 寶箱 ${ch} / 大寶 ${bt}`);
+    }, 600);
   } else if (msg.type === 'join'){
     if (msg.player.id === mpMyId) return;
     spawnOtherPlayer(msg.player);
