@@ -1451,17 +1451,22 @@ const bgm = new Audio();
 bgm.loop = true;
 bgm.preload = 'auto';
 bgm.src = 'assets/bgm.mp3';
-let bgmLoaded = false, bgmPlaying = false;
-bgm.addEventListener('canplaythrough', () => { bgmLoaded = true; }, { once: true });
+let bgmLoaded = false, bgmPlaying = false, bgmRequested = false;
+bgm.addEventListener('canplaythrough', () => {
+  bgmLoaded = true;
+  if (bgmRequested) startBgm();
+}, { once: true });
 bgm.addEventListener('error', () => { bgmLoaded = false; }, { once: true });
 function startBgm(){
-  if (!bgmLoaded || !audioPrefs.enabled || bgmPlaying) return;
-  bgm.volume = 0.25 * audioPrefs.volume;
+  if (!audioPrefs.enabled) return;
+  bgmRequested = true;          // remember the user has already gestured
+  if (!bgmLoaded || bgmPlaying) return;
+  bgm.volume = 0.28 * audioPrefs.volume;
   bgm.play().then(() => { bgmPlaying = true; }).catch(() => {});
 }
 function refreshAudioVolumes(){
   if (bgmPlaying){
-    if (audioPrefs.enabled) bgm.volume = 0.25 * audioPrefs.volume;
+    if (audioPrefs.enabled) bgm.volume = 0.28 * audioPrefs.volume;
     else { bgm.pause(); bgmPlaying = false; }
   }
 }
