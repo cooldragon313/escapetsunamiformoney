@@ -868,6 +868,7 @@ function renderShop(){
         applyStats();
         renderShop();
         updateHUD();
+        saveProgress();
       }
     });
   });
@@ -1044,10 +1045,11 @@ function update(now){
     state.money += state.bagValue;
     toast(`存入 +$${state.bagValue}`);
     hud.money.classList.remove('flash');
-    void hud.money.offsetWidth;        // restart CSS animation
+    void hud.money.offsetWidth;
     hud.money.classList.add('flash');
     state.bag = 0;
     state.bagValue = 0;
+    saveProgress();
   }
 
   // ----- Hilltop spend prompt -----
@@ -1201,8 +1203,33 @@ function update(now){
   requestAnimationFrame(update);
 }
 
+// ============================================================
+// PROGRESS PERSISTENCE
+// ============================================================
+function saveProgress(){
+  try {
+    localStorage.setItem('etfm-progress', JSON.stringify({
+      money: state.money,
+      upgrades: state.upgrades,
+      maxDist: state.maxDist,
+    }));
+  } catch(e){}
+}
+function loadProgress(){
+  try {
+    const data = JSON.parse(localStorage.getItem('etfm-progress') || 'null');
+    if (!data) return;
+    state.money   = data.money   || 0;
+    state.maxDist = data.maxDist || 0;
+    Object.assign(state.upgrades, data.upgrades || {});
+  } catch(e){}
+}
+loadProgress();
 applyStats();
 updateHUD();
+
+// Save on tab close / refresh as a safety net
+window.addEventListener('beforeunload', saveProgress);
 
 // ============================================================
 // MENUS: title / character creator / tutorial
