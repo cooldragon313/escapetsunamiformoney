@@ -171,7 +171,34 @@
   body.menu-mode #warn,
   body.menu-mode #toast,
   body.menu-mode #player-list,
-  body.menu-mode #resource-bar { display: none !important; }
+  body.menu-mode #resource-bar,
+  body.menu-mode #chat-log,
+  body.menu-mode #chat-input,
+  body.menu-mode #chat-hint { display: none !important; }
+  #chat-log { position: fixed; bottom: 50px; left: 12px;
+              max-width: 360px; pointer-events: none;
+              font-family: monospace; font-size: 13px;
+              display: flex; flex-direction: column;
+              z-index: 40; }
+  #chat-log .msg { background: rgba(0,0,0,0.6); padding: 4px 8px;
+                   margin-top: 3px; color: #fff;
+                   border-left: 3px solid #ffd700;
+                   word-wrap: break-word; }
+  #chat-log .msg.fade { opacity: 0; transition: opacity 1s; }
+  #chat-log .msg .name { color: #ffd700; font-weight: bold; margin-right: 6px; }
+  #chat-input { position: fixed; bottom: 16px; left: 50%;
+                transform: translateX(-50%); width: 400px; max-width: 90vw;
+                padding: 10px 14px;
+                background: rgba(0,0,0,0.88); color: #fff;
+                border: 2px solid #ffd700;
+                font-family: monospace; font-size: 14px;
+                outline: none; display: none; z-index: 1500;
+                pointer-events: auto; }
+  #chat-input.show { display: block; }
+  #chat-hint { position: fixed; bottom: 16px; right: 12px;
+               background: rgba(0,0,0,0.45); color: #aaa; padding: 4px 10px;
+               font-family: monospace; font-size: 11px;
+               pointer-events: none; z-index: 30; }
   #resource-bar { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
                   background: rgba(0,0,0,0.65); border: 2px solid #444;
                   padding: 8px 18px; display: flex; gap: 22px;
@@ -400,6 +427,10 @@
 <div id="hilltop-prompt"></div>
 <div id="plot-prompt"></div>
 
+<div id="chat-log"></div>
+<input id="chat-input" type="text" maxlength="80" placeholder="輸入訊息 · Enter 送出 · Esc 取消">
+<div id="chat-hint">按 <kbd>Enter</kbd> 開啟對話</div>
+
 <div id="death">
   <div>你 被 海 嘯 吞 噬</div>
   <div class="sub">寶藏掉落於死亡處 · 重生中…</div>
@@ -453,7 +484,7 @@
   <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 左右 ·
   <kbd>Space</kbd> 跳躍 ·
   <kbd>Shift</kbd> 衝刺 ·
-  <kbd>B</kbd> 升級店 / <kbd>C</kbd> 造型店 / <kbd>P</kbd> 買地 / <kbd>H</kbd> 蓋房子 ·
+  <kbd>B</kbd> 升級 / <kbd>C</kbd> 造型 / <kbd>P</kbd> 買地 / <kbd>H</kbd> 蓋屋 / <kbd>Enter</kbd> 聊天 ·
   <kbd>左鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
   跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
   <span style="color:#88ff66">綠 Lv3+</span> / <span style="color:#5588ff">藍標準 Lv6+</span> / <span style="color:#ff5050">紅快 Lv6+</span> /
@@ -1497,6 +1528,14 @@ function spawnTsunami(opts={}){
 // ============================================================
 const keys = {};
 window.addEventListener('keydown', e => {
+  // Chat input focused → don't pollute keys[] (and don't trigger game keybinds)
+  if (document.activeElement === chatInputEl) return;
+  // Enter (when game is running) opens chat
+  if (e.code === 'Enter' && state.gamePhase === 'playing' && !shopOpen && !cosShopOpen && !buildShopOpen){
+    e.preventDefault();
+    openChat();
+    return;
+  }
   keys[e.code] = true;
   if (e.code === 'KeyB') toggleShop();
   if (e.code === 'KeyC') toggleCosShop();
@@ -1523,7 +1562,10 @@ window.addEventListener('keydown', e => {
     else if (buildShopOpen) toggleBuildShop();
   }
 });
-window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('keyup', e => {
+  if (document.activeElement === chatInputEl) return;
+  keys[e.code] = false;
+});
 
 // ----- Touch / virtual joystick -----
 const touchInput = { jx: 0, jy: 0, jump: false, sprint: false };
@@ -2680,6 +2722,7 @@ function update(now){
 
   // Multiplayer (interpolate others + send our state)
   tickMultiplayer(dt);
+  tickChatBubbles();
 
   if (state.gamePhase === 'playing') updateHUD();
   renderer.render(scene, camera);
@@ -2997,6 +3040,117 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
+// ============================================================
+// CHAT — Enter to open, message bubbles above heads + log at bottom-left
+// ============================================================
+let chatInputOpen = false;
+const chatInputEl = document.getElementById('chat-input');
+const chatLogEl   = document.getElementById('chat-log');
+function openChat(){
+  if (chatInputOpen) return;
+  chatInputOpen = true;
+  chatInputEl.value = '';
+  chatInputEl.classList.add('show');
+  chatInputEl.focus();
+}
+function closeChat(){
+  chatInputOpen = false;
+  chatInputEl.classList.remove('show');
+  chatInputEl.blur();
+}
+function sendChat(text){
+  text = String(text || '').trim().slice(0, 120);
+  if (!text) return;
+  if (mpSocket && mpSocket.readyState === WebSocket.OPEN){
+    mpSocket.send(JSON.stringify({ type: 'chat', text }));
+  } else {
+    receiveChat({ id: 'local', name: state.custom?.name || '我', text });
+  }
+}
+chatInputEl.addEventListener('keydown', e => {
+  e.stopPropagation();   // keep keys[] in main listener untouched while typing
+  if (e.code === 'Enter'){
+    e.preventDefault();
+    sendChat(chatInputEl.value);
+    closeChat();
+  } else if (e.code === 'Escape'){
+    e.preventDefault();
+    closeChat();
+  }
+});
+chatInputEl.addEventListener('keyup', e => e.stopPropagation());
+
+function makeChatBubble(text){
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  const r = 22, p = 4;
+  const w = canvas.width - p*2, h = canvas.height - p*2;
+  ctx.beginPath();
+  ctx.moveTo(p+r, p);
+  ctx.lineTo(p+w-r, p);
+  ctx.quadraticCurveTo(p+w, p, p+w, p+r);
+  ctx.lineTo(p+w, p+h-r);
+  ctx.quadraticCurveTo(p+w, p+h, p+w-r, p+h);
+  ctx.lineTo(p+r, p+h);
+  ctx.quadraticCurveTo(p, p+h, p, p+h-r);
+  ctx.lineTo(p, p+r);
+  ctx.quadraticCurveTo(p, p, p+r, p);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#222';
+  ctx.font = 'bold 32px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const display = text.length > 36 ? text.slice(0, 34) + '..' : text;
+  ctx.fillText(display, canvas.width/2, canvas.height/2);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, fog: false }));
+  sprite.scale.set(5.5, 1.0, 1);
+  sprite.userData.isBubble = true;
+  sprite.userData.expiresAt = performance.now() + 5000;
+  return sprite;
+}
+function showPlayerBubble(group, text){
+  if (!group) return;
+  // remove any existing bubble first
+  for (let i = group.children.length - 1; i >= 0; i--){
+    if (group.children[i].userData?.isBubble) group.remove(group.children[i]);
+  }
+  const b = makeChatBubble(text);
+  b.position.y = 5.4;
+  group.add(b);
+}
+function tickChatBubbles(){
+  const now = performance.now();
+  const sweep = g => {
+    if (!g) return;
+    for (let i = g.children.length - 1; i >= 0; i--){
+      const c = g.children[i];
+      if (c.userData?.isBubble && c.userData.expiresAt < now) g.remove(c);
+    }
+  };
+  sweep(player);
+  for (const o of otherPlayers.values()) sweep(o.group);
+}
+function receiveChat(msg){
+  const div = document.createElement('div');
+  div.className = 'msg';
+  div.innerHTML = `<span class="name">${escapeHtml(msg.name || '???')}</span>${escapeHtml(msg.text)}`;
+  chatLogEl.appendChild(div);
+  while (chatLogEl.children.length > 6) chatLogEl.removeChild(chatLogEl.firstChild);
+  setTimeout(() => div.classList.add('fade'), 8000);
+  setTimeout(() => div.remove(), 9500);
+  if (msg.id === mpMyId || msg.id === 'local'){
+    showPlayerBubble(player, msg.text);
+  } else {
+    const o = otherPlayers.get(msg.id);
+    if (o) showPlayerBubble(o.group, msg.text);
+  }
+}
+
 function rebuildOtherAvatar(o, p){
   // Replace mesh with new custom while keeping target position
   if (!o) return;
@@ -3200,6 +3354,8 @@ function mpHandleMessage(raw){
   } else if (msg.type === 'coin_spawn'){
     // Server spawned a fresh coin (e.g. spillover from a chest pickup)
     addCoinFromServer(msg.coin);
+  } else if (msg.type === 'chat'){
+    receiveChat({ id: msg.id, name: msg.name, text: msg.text });
   } else if (msg.type === 'plot_owned'){
     const p = PLOTS.find(x => x.id === msg.plotId);
     if (p){
