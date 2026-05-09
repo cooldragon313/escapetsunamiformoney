@@ -539,7 +539,10 @@ function clearAllCoins(){
   for (const c of coins){ if (c.mesh) scene.remove(c.mesh); }
   coins.length = 0;
 }
-// In single-player mode coins spawn locally; in MP they arrive via 'init'
+// In single-player mode coins spawn locally; in MP they arrive via 'init'.
+// We may flip mpAuthoritative=false at runtime if the server is older than 1B
+// (didn't send a coins[] in init), in which case we fall back to local spawn.
+let mpAuthoritative = MP_ENABLED;
 if (!MP_ENABLED) spawnInitialCoins();
 
 // ============================================================
@@ -1102,7 +1105,7 @@ function update(now){
             toast(`找回死亡寶藏 +$${c.value}（帶回山頂存款）`);
             sfx.bigCoin();
           }
-        } else if (MP_ENABLED){
+        } else if (mpAuthoritative){
           // Race for coin via server; bag credit happens on coin_pickup confirmation
           if (!c.attempting && state.bag < state.carryMax && mpSocket && mpSocket.readyState === WebSocket.OPEN){
             c.attempting = true;
@@ -1143,8 +1146,8 @@ function update(now){
     hud.hilltopPrompt.classList.remove('show');
   }
 
-  // ----- Coin replenishment (single-player only; MP mode driven by server) -----
-  if (!MP_ENABLED){
+  // ----- Coin replenishment (only when world isn't server-authoritative) -----
+  if (!mpAuthoritative){
     state.coinRefreshAccum += dt;
     if (state.coinRefreshAccum > 60){
       state.coinRefreshAccum = 0;
@@ -1161,8 +1164,8 @@ function update(now){
     }
   }
 
-  // ----- Storm system + tsunami spawning (single-player only; MP server-driven) -----
-  if (!MP_ENABLED){
+  // ----- Storm system + tsunami spawning (only when world isn't server-authoritative) -----
+  if (!mpAuthoritative){
     const depthFactor = Math.min(1, state.maxDist / RUNWAY_LEN);
     if (!state.storm && t > state.stormCooldownUntil && Math.random() < dt * 0.025){
       state.storm = true;
@@ -1206,7 +1209,7 @@ function update(now){
   // ----- Tsunami updates -----
   for (let i = tsunamis.length - 1; i >= 0; i--){
     const ts = tsunamis[i];
-    if (MP_ENABLED && ts.spawnTime){
+    if (mpAuthoritative && ts.spawnTime){
       // Server-authoritative: position derived from elapsed time so all clients agree
       const elapsed = (Date.now() - ts.spawnTime) / 1000;
       ts.obj.group.position.z = ts.fromZ + ts.speed * 60 * elapsed;
@@ -1238,8 +1241,8 @@ function update(now){
         }
       }
     }
-    // Single-player removes waves locally; MP waits for wave_remove from server
-    if (!MP_ENABLED && ts.obj.group.position.z > TSUNAMI_STOP_Z){
+    // Local-spawned waves are removed locally; server-authoritative waits for wave_remove
+    if (!mpAuthoritative && ts.obj.group.position.z > TSUNAMI_STOP_Z){
       scene.remove(ts.obj.group);
       tsunamis.splice(i, 1);
     }
@@ -1594,8 +1597,9 @@ function mpHandleMessage(raw){
   if (msg.type === 'init'){
     mpMyId = msg.yourId;
     msg.players.forEach(p => { if (p.id !== mpMyId) spawnOtherPlayer(p); });
-    // Replace local coins / waves with server snapshot
-    if (MP_ENABLED){
+    // Detect Phase-1B server: it sends coins/waves arrays. Older 1A servers don't.
+    if (MP_ENABLED && Array.isArray(msg.coins) && Array.isArray(msg.waves)){
+      mpAuthoritative = true;
       clearAllCoins();
       msg.coins.forEach(addCoinFromServer);
       for (const ts of tsunamis) scene.remove(ts.obj.group);
@@ -1606,6 +1610,12 @@ function mpHandleMessage(raw){
         scene.background = new THREE.Color(0x4a3030);
         scene.fog.color.setHex(0x4a3030);
       }
+    } else if (MP_ENABLED){
+      // Older / incompatible server — gracefully degrade to local spawning so
+      // the game is still playable. Each client sees their own coins / waves.
+      mpAuthoritative = false;
+      if (coins.length === 0) spawnInitialCoins();
+      toast('Server 為舊版，金幣/海嘯改本地生成');
     }
     toast(`連線成功（線上 ${msg.players.length} 人）`);
   } else if (msg.type === 'join'){
