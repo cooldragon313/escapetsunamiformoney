@@ -448,7 +448,7 @@ const STATS_BASE = {
 const UPGRADE_DEF = [
   { key:'speed',         name:'跑速',     unit:'/格',  step:0.04, baseCost: 30 },
   { key:'jump',          name:'跳高',     unit:'',     step:0.08, baseCost: 25 },
-  { key:'diveTime',      name:'潛水時間', unit:'秒',   step:1.0,  baseCost: 35 },
+  { key:'diveTime',      name:'潛水時間', unit:'秒',   step:1.0,  baseCost: 35, hidden: true },
   { key:'pickupRadius',  name:'撿取範圍', unit:'格',   step:0.4,  baseCost: 25 },
   { key:'carryMax',      name:'負重',     unit:'個',   step:5,    baseCost: 40 },
 ];
@@ -1186,6 +1186,7 @@ function renderShop(){
   hud.shopMoney.textContent = state.money;
   hud.shopList.innerHTML = '';
   UPGRADE_DEF.forEach(def => {
+    if (def.hidden) return;
     const lv = state.upgrades[def.key];
     const cost = upgradeCost(def, lv);
     const cur = STATS_BASE[def.key] + def.step * lv;
@@ -1721,6 +1722,22 @@ function loadProgress(){
   } catch(e){}
 }
 loadProgress();
+
+// One-time migration: pit redesign removed the diveTime upgrade.
+// Refund the cost of any already-purchased levels.
+(function migrateDiveTime(){
+  const def = UPGRADE_DEF.find(d => d.key === 'diveTime');
+  const lv = state.upgrades.diveTime || 0;
+  if (def && lv > 0){
+    let refund = 0;
+    for (let i = 0; i < lv; i++) refund += upgradeCost(def, i);
+    state.money += refund;
+    state.upgrades.diveTime = 0;
+    saveProgress();
+    setTimeout(() => toast(`潛水時間已移除，退還 $${refund}`), 1200);
+  }
+})();
+
 applyStats();
 updateHUD();
 
