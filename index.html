@@ -53,6 +53,36 @@
   .upgrade button:hover:not(:disabled) { background:#3a5a9a; }
   .upgrade button:disabled { background:#333; color:#666; cursor:not-allowed; border-color:#555; }
   #shop .hint { margin-top: 12px; font-size: 12px; color:#888; text-align:center; }
+  #cos-shop { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+              background: rgba(20,30,50,0.96); border: 3px solid #88c0ff;
+              padding: 22px 28px; min-width: 480px; max-width: 90vw;
+              max-height: 88vh; overflow-y: auto;
+              display:none; box-shadow: 0 0 32px #000; z-index: 1500; }
+  #cos-shop.show { display:block; }
+  #cos-shop h3 { margin: 0 0 14px; text-align:center; color:#ff66bb; font-size: 20px; letter-spacing: 4px; }
+  #cos-shop .money-bar { text-align:center; color:#ffd700; margin-bottom: 12px; font-size: 14px; }
+  #cos-tabs { display:flex; gap: 6px; margin-bottom: 12px; justify-content: center; }
+  #cos-tabs button { background: #2a3a5a; color:#fff; border: 1px solid #4a8acf;
+                     padding: 6px 14px; cursor: pointer; font-family: monospace;
+                     font-size: 13px; }
+  #cos-tabs button.active { background:#5a3a7a; border-color:#ff66bb; }
+  #cos-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .cos-item { background: rgba(0,0,0,0.3); border: 1px solid #555; padding: 8px;
+              display:flex; flex-direction: column; gap: 6px; }
+  .cos-item .top { display:flex; justify-content: space-between; align-items: baseline; }
+  .cos-item .name { font-size: 13px; color:#fff; }
+  .cos-item .price { color: #ffd700; font-size: 12px; }
+  .cos-item button { background: #2a4a8a; color: #fff; border: 1px solid #88c0ff;
+                     padding: 5px 10px; cursor: pointer; font-family: monospace; font-size: 12px; }
+  .cos-item button:hover:not(:disabled) { background: #3a5a9a; }
+  .cos-item button:disabled { background:#333; color:#666; border-color:#555; cursor:not-allowed; }
+  .cos-item.equipped { border-color: #ff66bb; box-shadow: 0 0 8px rgba(255,102,187,0.4); }
+  .cos-item.owned { border-color: #88c0ff; }
+  #cos-redesign { display: block; margin: 16px auto 0; padding: 8px 18px;
+                  background: #663366; color: #fff; border: 2px solid #ff66bb;
+                  cursor: pointer; font-family: monospace; font-size: 13px; }
+  #cos-redesign:hover { background: #774477; }
+  #cos-redesign:disabled { background:#333; color:#666; border-color:#555; cursor:not-allowed; }
   #help { position: fixed; bottom: 12px; left: 12px; padding: 8px 12px;
           background: rgba(0,0,0,0.55); border: 1px solid #444; font-size: 12px;
           color:#aaa; line-height: 1.7; max-width: 720px; }
@@ -352,6 +382,20 @@
   <div class="hint">按 <kbd>B</kbd> 或 <kbd>Esc</kbd> 關閉</div>
 </div>
 
+<div id="cos-shop">
+  <h3>✨ 造 型 店 ✨</h3>
+  <div class="money-bar">持有金錢：$<span id="cos-money">0</span></div>
+  <div id="cos-tabs">
+    <button data-slot="hat" class="active">帽</button>
+    <button data-slot="face">臉</button>
+    <button data-slot="back">背</button>
+    <button data-slot="accessory">配件</button>
+  </div>
+  <div id="cos-list"></div>
+  <button id="cos-redesign" type="button">$50 整套造型重選（換髮 / 衣 / 身材…）</button>
+  <div class="hint">沒衣櫃時，買新的會自動賣掉舊的（退 1/3 價）<br>按 <kbd>C</kbd> 或 <kbd>Esc</kbd> 關閉</div>
+</div>
+
 <div id="touch-controls">
   <div id="stick"><div id="stick-knob"></div></div>
   <div id="btn-sprint" class="touch-btn">衝刺</div>
@@ -365,7 +409,7 @@
   <kbd>A</kbd><kbd>D</kbd>/<kbd>←</kbd><kbd>→</kbd> 左右 ·
   <kbd>Space</kbd> 跳躍 ·
   <kbd>Shift</kbd> 衝刺 ·
-  <kbd>B</kbd> 商店（山頂） ·
+  <kbd>B</kbd> 升級商店 / <kbd>C</kbd> 造型店（山頂） ·
   <kbd>右鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
   跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
   <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
@@ -803,9 +847,216 @@ const DEFAULT_CUSTOM = {
   expression: 'smile',
   body: 'normal',    // 'thin' | 'normal' | 'large'
   skin: 0xf0c090, shirt: 0xd04040, pants: 0x1a1a4a, shoes: 0x5a3a1a,
+  cosmetics: { hat: '', face: '', back: '', accessory: '' },
 };
 const BODY_SCALES = { thin: 0.85, normal: 1.0, large: 1.3 };
 const BODY_SPEED_MUL = { thin: 1.10, normal: 1.0, large: 0.85 };
+
+// ============================================================
+// COSMETICS — 20 items the player can buy in the costume shop.
+// Each builds a small voxel mesh that gets attached to the avatar.
+// ============================================================
+const COSMETIC_OFFSETS = {
+  hat:       { y: 3.10, z:  0    },
+  face:      { y: 2.72, z: -0.50 },
+  back:      { y: 1.55, z:  0.65 },
+  accessory: { y: 2.00, z: -0.42 },
+};
+const _cosBox = (w,h,d,c, mat={}) => new THREE.Mesh(
+  new THREE.BoxGeometry(w,h,d),
+  new THREE.MeshLambertMaterial({color:c, ...mat})
+);
+const COSMETICS = [
+  // ---- HAT (5) ----
+  { id:'crown', slot:'hat', name:'金皇冠', price:120, build:()=>{
+    const g = new THREE.Group();
+    const ring = _cosBox(0.96, 0.32, 0.96, 0xffd700); ring.position.y = 0.16; g.add(ring);
+    for (let i = 0; i < 4; i++){
+      const a = i * Math.PI / 2;
+      const sp = _cosBox(0.18, 0.32, 0.18, 0xffd700);
+      sp.position.set(Math.sin(a)*0.36, 0.50, Math.cos(a)*0.36);
+      g.add(sp);
+    }
+    return g;
+  }},
+  { id:'pirate_hat', slot:'hat', name:'海盜帽', price:80, build:()=>{
+    const g = new THREE.Group();
+    const main = _cosBox(1.15, 0.32, 0.5, 0x222222); main.position.y = 0.16; g.add(main);
+    const top  = _cosBox(0.4, 0.4, 0.4, 0x222222); top.position.y = 0.52; g.add(top);
+    const sk   = _cosBox(0.18, 0.18, 0.05, 0xffffff); sk.position.set(0, 0.22, -0.27); g.add(sk);
+    return g;
+  }},
+  { id:'party_hat', slot:'hat', name:'派對尖帽', price:50, build:()=>{
+    const g = new THREE.Group();
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.2, 8),
+      new THREE.MeshLambertMaterial({color:0xff66bb}));
+    cone.position.y = 0.6; g.add(cone);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6),
+      new THREE.MeshLambertMaterial({color:0xffee44})); tip.position.y = 1.3; g.add(tip);
+    return g;
+  }},
+  { id:'space_helmet', slot:'hat', name:'太空頭盔', price:200, build:()=>{
+    const g = new THREE.Group();
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.65, 12, 8),
+      new THREE.MeshLambertMaterial({color:0xeeeeee, transparent:true, opacity:0.55}));
+    dome.position.y = 0.35; g.add(dome);
+    const ring = _cosBox(1.0, 0.12, 1.0, 0x999999); ring.position.y = -0.05; g.add(ring);
+    return g;
+  }},
+  { id:'poop_hat', slot:'hat', name:'大便帽', price:60, build:()=>{
+    const g = new THREE.Group();
+    for (let i = 0; i < 4; i++){
+      const layer = _cosBox(0.65 - i*0.13, 0.16, 0.65 - i*0.13, 0x6a3a1a);
+      layer.position.y = 0.10 + i * 0.16; g.add(layer);
+    }
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.2, 6),
+      new THREE.MeshLambertMaterial({color:0x6a3a1a}));
+    tip.position.y = 0.85; g.add(tip);
+    return g;
+  }},
+  // ---- FACE (5) ----
+  { id:'sunglasses', slot:'face', name:'太陽眼鏡', price:60, build:()=>{
+    const g = new THREE.Group();
+    g.add(_cosBox(0.7, 0.05, 0.05, 0x111111));
+    const lL = _cosBox(0.27, 0.18, 0.05, 0x111111); lL.position.set(-0.18, -0.02, 0); g.add(lL);
+    const lR = _cosBox(0.27, 0.18, 0.05, 0x111111); lR.position.set( 0.18, -0.02, 0); g.add(lR);
+    return g;
+  }},
+  { id:'3d_glasses', slot:'face', name:'3D 眼鏡', price:50, build:()=>{
+    const g = new THREE.Group();
+    g.add(_cosBox(0.7, 0.05, 0.05, 0xeeeeee));
+    const lL = _cosBox(0.27, 0.18, 0.05, 0xff3030); lL.position.set(-0.18, -0.02, 0); g.add(lL);
+    const lR = _cosBox(0.27, 0.18, 0.05, 0x3030ff); lR.position.set( 0.18, -0.02, 0); g.add(lR);
+    return g;
+  }},
+  { id:'mustache', slot:'face', name:'大鬍子', price:40, build:()=>{
+    const g = new THREE.Group();
+    const m = _cosBox(0.5, 0.12, 0.04, 0x222222); g.add(m);
+    const ml = _cosBox(0.06, 0.06, 0.04, 0x222222); ml.position.set(-0.27, 0.02, 0); g.add(ml);
+    const mr = _cosBox(0.06, 0.06, 0.04, 0x222222); mr.position.set( 0.27, 0.02, 0); g.add(mr);
+    return g;
+  }},
+  { id:'unicorn_horn', slot:'face', name:'獨角獸角', price:100, build:()=>{
+    const g = new THREE.Group();
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.55, 6),
+      new THREE.MeshLambertMaterial({color:0xff66bb}));
+    horn.position.set(0, 0.55, 0); g.add(horn);
+    return g;
+  }},
+  { id:'red_nose', slot:'face', name:'紅鼻子', price:30, build:()=>{
+    const g = new THREE.Group();
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6),
+      new THREE.MeshLambertMaterial({color:0xff2020}));
+    g.add(ball);
+    return g;
+  }},
+  // ---- BACK (5) ----
+  { id:'angel_wings', slot:'back', name:'天使翅膀', price:300, build:()=>{
+    const g = new THREE.Group();
+    const wL = _cosBox(0.9, 1.3, 0.08, 0xffffff); wL.position.set(-0.7, 0, 0); wL.rotation.y = -0.5; g.add(wL);
+    const wR = _cosBox(0.9, 1.3, 0.08, 0xffffff); wR.position.set( 0.7, 0, 0); wR.rotation.y =  0.5; g.add(wR);
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.06, 8, 16),
+      new THREE.MeshBasicMaterial({color:0xffd700}));
+    halo.rotation.x = Math.PI/2; halo.position.set(0, 1.7, 0); g.add(halo);
+    return g;
+  }},
+  { id:'rocket_pack', slot:'back', name:'噴射背包', price:200, build:()=>{
+    const g = new THREE.Group();
+    g.add(_cosBox(0.6, 0.9, 0.5, 0x666666));
+    const tL = _cosBox(0.18, 1.0, 0.18, 0x999999); tL.position.x = -0.32; g.add(tL);
+    const tR = _cosBox(0.18, 1.0, 0.18, 0x999999); tR.position.x =  0.32; g.add(tR);
+    const fL = _cosBox(0.16, 0.3, 0.16, 0xff5500); fL.position.set(-0.32, -0.65, 0); g.add(fL);
+    const fR = _cosBox(0.16, 0.3, 0.16, 0xff5500); fR.position.set( 0.32, -0.65, 0); g.add(fR);
+    return g;
+  }},
+  { id:'turtle_shell', slot:'back', name:'烏龜殼', price:150, build:()=>{
+    const g = new THREE.Group();
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.7, 10, 6, 0, Math.PI*2, 0, Math.PI/2),
+      new THREE.MeshLambertMaterial({color:0x44aa44})
+    );
+    g.add(dome);
+    for (let i = 0; i < 5; i++){
+      const a = i * Math.PI * 2 / 5;
+      const sp = _cosBox(0.18, 0.18, 0.18, 0x336633);
+      sp.position.set(Math.sin(a)*0.35, 0.3, Math.cos(a)*0.35);
+      g.add(sp);
+    }
+    return g;
+  }},
+  { id:'bat_wings', slot:'back', name:'蝙蝠翅膀', price:180, build:()=>{
+    const g = new THREE.Group();
+    const wL = _cosBox(0.8, 1.0, 0.05, 0x222222); wL.position.x = -0.55; wL.rotation.y = -0.4; g.add(wL);
+    const wR = _cosBox(0.8, 1.0, 0.05, 0x222222); wR.position.x =  0.55; wR.rotation.y =  0.4; g.add(wR);
+    return g;
+  }},
+  { id:'rainbow_tail', slot:'back', name:'彩虹尾巴', price:120, build:()=>{
+    const g = new THREE.Group();
+    const colors = [0xff3030, 0xff8800, 0xffee00, 0x44dd44, 0x44aaff];
+    for (let i = 0; i < 5; i++){
+      const seg = _cosBox(0.20, 0.20, 0.20, colors[i]);
+      seg.position.set(Math.sin(i*0.4)*0.1, -i*0.18, 0.1 + i*0.15);
+      g.add(seg);
+    }
+    return g;
+  }},
+  // ---- ACCESSORY (5) ----
+  { id:'gold_chain', slot:'accessory', name:'金項鍊', price:80, build:()=>{
+    const g = new THREE.Group();
+    const c = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.05, 6, 16),
+      new THREE.MeshLambertMaterial({color:0xffd700}));
+    c.rotation.x = Math.PI/2; g.add(c);
+    const p = _cosBox(0.16, 0.20, 0.05, 0xffd700); p.position.y = -0.42; g.add(p);
+    return g;
+  }},
+  { id:'red_cape', slot:'accessory', name:'紅披風', price:120, build:()=>{
+    const g = new THREE.Group();
+    const cape = _cosBox(1.0, 1.5, 0.05, 0xc62828);
+    cape.position.set(0, -0.55, 0.5); g.add(cape);
+    return g;
+  }},
+  { id:'bowtie', slot:'accessory', name:'蝴蝶結', price:50, build:()=>{
+    const g = new THREE.Group();
+    const bL = _cosBox(0.20, 0.18, 0.05, 0xff66bb); bL.position.x = -0.13; g.add(bL);
+    const bR = _cosBox(0.20, 0.18, 0.05, 0xff66bb); bR.position.x =  0.13; g.add(bR);
+    g.add(_cosBox(0.08, 0.16, 0.06, 0x222222));
+    return g;
+  }},
+  { id:'rainbow_scarf', slot:'accessory', name:'彩虹圍巾', price:90, build:()=>{
+    const g = new THREE.Group();
+    const colors = [0xff3030, 0xff8800, 0xffee00, 0x44dd44];
+    for (let i = 0; i < 4; i++){
+      const seg = _cosBox(0.65, 0.13, 0.65, colors[i]);
+      seg.position.y = -i * 0.13; g.add(seg);
+    }
+    return g;
+  }},
+  { id:'bell', slot:'accessory', name:'鈴鐺項圈', price:40, build:()=>{
+    const g = new THREE.Group();
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.04, 6, 16),
+      new THREE.MeshLambertMaterial({color:0x666666}));
+    collar.rotation.x = Math.PI/2; g.add(collar);
+    const bell = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6),
+      new THREE.MeshLambertMaterial({color:0xffd700}));
+    bell.position.y = -0.4; g.add(bell);
+    return g;
+  }},
+];
+const COSMETICS_BY_ID = Object.fromEntries(COSMETICS.map(c => [c.id, c]));
+
+function attachCosmetics(group, cosmetics){
+  if (!cosmetics) return;
+  for (const slot of ['hat','face','back','accessory']){
+    const id = cosmetics[slot];
+    if (!id) continue;
+    const def = COSMETICS_BY_ID[id];
+    if (!def) continue;
+    const m = def.build();
+    const off = COSMETIC_OFFSETS[slot];
+    m.position.set(off.x ?? 0, off.y ?? 0, off.z ?? 0);
+    group.add(m);
+  }
+}
 
 function buildAvatar(custom){
   custom = custom || DEFAULT_CUSTOM;
@@ -840,6 +1091,7 @@ function buildAvatar(custom){
   const shoeL = mk(0.5, 0.18, 0.7, custom.shoes); shoeL.position.set(-0.32, 0.09, 0.05); g.add(shoeL);
   const shoeR = mk(0.5, 0.18, 0.7, custom.shoes); shoeR.position.set( 0.32, 0.09, 0.05); g.add(shoeR);
   const pack  = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); g.add(pack);
+  attachCosmetics(g, custom.cosmetics);
   return { group: g, legL: lL, legR: lR, armL: aL, armR: aR };
 }
 
@@ -925,7 +1177,11 @@ const keys = {};
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyB') toggleShop();
-  if (e.code === 'Escape' && shopOpen) toggleShop();
+  if (e.code === 'KeyC') toggleCosShop();
+  if (e.code === 'Escape'){
+    if (shopOpen) toggleShop();
+    else if (cosShopOpen) toggleCosShop();
+  }
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -1114,6 +1370,7 @@ const state = {
   carryMax: STATS_BASE.carryMax,
   upgrades: { speed:0, jump:0, diveTime:0, pickupRadius:0, carryMax:0 },
   wood: 0, stone: 0, iron: 0,    // crafting materials (private to player)
+  cosmeticsOwned: [],            // ids the player has bought
   alive: true,
   maxDist: 0,
   spawnAccum: 0,
@@ -1306,6 +1563,127 @@ function toggleShop(){
   hud.shop.classList.toggle('show', shopOpen);
   if (shopOpen) renderShop();
 }
+
+// ===== Cosmetic shop =====
+let cosShopOpen = false;
+let cosShopTab = 'hat';
+function toggleCosShop(){
+  if (!cosShopOpen && !inBase()){
+    toast('要爬到山頂才能開造型店');
+    return;
+  }
+  if (!state.alive) return;
+  cosShopOpen = !cosShopOpen;
+  document.getElementById('cos-shop').classList.toggle('show', cosShopOpen);
+  if (cosShopOpen) renderCosShop();
+}
+function ownsCosmetic(id){ return state.cosmeticsOwned.includes(id); }
+function equippedInSlot(slot){ return state.custom.cosmetics?.[slot] || ''; }
+function ownedInSlot(slot){
+  return state.cosmeticsOwned.find(id => COSMETICS_BY_ID[id]?.slot === slot);
+}
+function rebuildLocalAvatar(){
+  buildPlayer(state.custom);
+  if (mpSocket && mpSocket.readyState === WebSocket.OPEN) mpSendIdentify();
+}
+function renderCosShop(){
+  document.getElementById('cos-money').textContent = state.money;
+  // tabs
+  document.querySelectorAll('#cos-tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.slot === cosShopTab);
+  });
+  const list = document.getElementById('cos-list');
+  list.innerHTML = '';
+  const equipped = equippedInSlot(cosShopTab);
+  const owned = ownedInSlot(cosShopTab);
+  COSMETICS.filter(c => c.slot === cosShopTab).forEach(item => {
+    const o = ownsCosmetic(item.id);
+    const eq = equipped === item.id;
+    const div = document.createElement('div');
+    div.className = 'cos-item' + (eq ? ' equipped' : (o ? ' owned' : ''));
+    let btn;
+    if (eq) btn = `<button data-act="unequip" data-id="${item.id}">取下</button>`;
+    else if (o) btn = `<button data-act="equip" data-id="${item.id}">裝備</button>`;
+    else {
+      // Buying: if there's another owned item in the same slot, sell-on-swap
+      const swap = owned ? COSMETICS_BY_ID[owned] : null;
+      const refund = swap ? Math.floor(swap.price / 3) : 0;
+      const net = item.price - refund;
+      const canAfford = state.money >= net;
+      const swapHint = swap ? `<div style="font-size:11px;color:#aaa">換掉 ${swap.name} 退 $${refund}（淨 $${net}）</div>` : '';
+      btn = `${swapHint}<button data-act="buy" data-id="${item.id}" ${canAfford ? '' : 'disabled'}>$${item.price} 購買</button>`;
+    }
+    div.innerHTML = `
+      <div class="top"><span class="name">${item.name}</span><span class="price">$${item.price}</span></div>
+      ${btn}
+    `;
+    list.appendChild(div);
+  });
+  document.getElementById('cos-redesign').disabled = state.money < 50;
+}
+document.getElementById('cos-tabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-slot]');
+  if (!b) return;
+  cosShopTab = b.dataset.slot;
+  renderCosShop();
+});
+document.getElementById('cos-list').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const def = COSMETICS_BY_ID[id];
+  if (!def) return;
+  const slot = def.slot;
+  if (btn.dataset.act === 'buy'){
+    // Without wardrobe: auto-sell existing item in the same slot at 1/3 price
+    const existing = ownedInSlot(slot);
+    let net = def.price;
+    if (existing && existing !== id){
+      const swap = COSMETICS_BY_ID[existing];
+      net -= Math.floor(swap.price / 3);
+    }
+    if (state.money < net) return;
+    state.money -= net;
+    if (existing && existing !== id){
+      state.cosmeticsOwned = state.cosmeticsOwned.filter(x => x !== existing);
+    }
+    state.cosmeticsOwned.push(id);
+    state.custom.cosmetics = state.custom.cosmetics || { hat:'', face:'', back:'', accessory:'' };
+    state.custom.cosmetics[slot] = id;
+    sfx.buy();
+    toast(`購買 ${def.name}！`);
+    saveProgress();
+    localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
+    rebuildLocalAvatar();
+    renderCosShop();
+    updateHUD();
+  } else if (btn.dataset.act === 'equip'){
+    state.custom.cosmetics = state.custom.cosmetics || { hat:'', face:'', back:'', accessory:'' };
+    state.custom.cosmetics[slot] = id;
+    localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
+    rebuildLocalAvatar();
+    renderCosShop();
+  } else if (btn.dataset.act === 'unequip'){
+    if (state.custom.cosmetics) state.custom.cosmetics[slot] = '';
+    localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
+    rebuildLocalAvatar();
+    renderCosShop();
+  }
+});
+document.getElementById('cos-redesign').addEventListener('click', () => {
+  if (state.money < 50) return;
+  state.money -= 50;
+  saveProgress();
+  // Close cosmetic shop, re-open creator screen as a "redesign" pass
+  cosShopOpen = false;
+  document.getElementById('cos-shop').classList.remove('show');
+  show('creator-screen');
+  state.gamePhase = 'creator';
+  setMenuMode(true);
+  applyCustomToUI();
+  toast('-$50 整套造型重選');
+  updateHUD();
+});
 
 // ============================================================
 // DEATH / RESPAWN
@@ -1594,8 +1972,8 @@ function update(now){
   if (!inBase()) state._wasInBase = false;
 
   // ----- Hilltop spend prompt -----
-  if (state.alive && inBase() && state.money > 0 && !shopOpen){
-    hud.hilltopPrompt.textContent = `按 B 開商店消費 ($${state.money})`;
+  if (state.alive && inBase() && state.money > 0 && !shopOpen && !cosShopOpen){
+    hud.hilltopPrompt.textContent = `B 升級 · C 造型店  ($${state.money})`;
     hud.hilltopPrompt.classList.add('show');
   } else {
     hud.hilltopPrompt.classList.remove('show');
@@ -1789,6 +2167,7 @@ function saveProgress(){
       upgrades: state.upgrades,
       maxDist: state.maxDist,
       wood: state.wood, stone: state.stone, iron: state.iron,
+      cosmeticsOwned: state.cosmeticsOwned,
     }));
   } catch(e){}
 }
@@ -1801,6 +2180,7 @@ function loadProgress(){
     state.wood    = data.wood    || 0;
     state.stone   = data.stone   || 0;
     state.iron    = data.iron    || 0;
+    state.cosmeticsOwned = Array.isArray(data.cosmeticsOwned) ? data.cosmeticsOwned : [];
     Object.assign(state.upgrades, data.upgrades || {});
   } catch(e){}
 }
@@ -2472,6 +2852,7 @@ document.getElementById('start-game').addEventListener('click', () => {
   localStorage.setItem('etfm-custom', JSON.stringify(state.custom));
   buildPlayer(state.custom);
   refreshPlayerList();
+  if (mpSocket && mpSocket.readyState === WebSocket.OPEN) mpSendIdentify();
   hide('creator-screen');
   if (localStorage.getItem('etfm-tutorial') === 'yes'){
     state.gamePhase = 'playing';
