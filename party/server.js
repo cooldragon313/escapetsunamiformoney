@@ -15,13 +15,15 @@ const BIG_TREASURE_RESPAWN_MS = 600_000;   // 10 minutes
 const BIG_TREASURE_VALUE = 50;
 const BIG_TREASURE_Z = -1000;             // boundary of old map / start of new content
 
+// Heights kept in sync with the client; server only uses speedMul / width
+// for spawn calculations.
 const WAVE_TYPES = [
-  { id:'green',  height:3.0, width:14, speedMul:1.0,  weight:18, storm:false },
-  { id:'blue',   height:6,   width:18, speedMul:1.0,  weight:30, storm:false },
-  { id:'red',    height:7,   width:14, speedMul:1.8,  weight:18, storm:false },
-  { id:'wide',   height:6,   width:32, speedMul:0.85, weight:14, storm:false },
-  { id:'purple', height:14,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:8, storm:true },
-  { id:'titan',  height:22,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:3, storm:true },
+  { id:'green',  height:8,  width:14, speedMul:1.0,  weight:18, storm:false },
+  { id:'blue',   height:15, width:18, speedMul:1.0,  weight:30, storm:false },
+  { id:'red',    height:15, width:14, speedMul:1.8,  weight:18, storm:false },
+  { id:'wide',   height:15, width:32, speedMul:0.85, weight:14, storm:false },
+  { id:'purple', height:25, width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:8, storm:true },
+  { id:'titan',  height:50, width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:3, storm:true },
 ];
 function pickWaveType(stormBoost){
   let total = 0;

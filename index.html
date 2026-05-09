@@ -456,8 +456,8 @@
   <kbd>B</kbd> 升級店 / <kbd>C</kbd> 造型店 / <kbd>P</kbd> 買地 / <kbd>H</kbd> 蓋房子 ·
   <kbd>左鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
   跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
-  <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
-  <span style="color:#5588ff">藍標準</span> · <span style="color:#ff5050">紅快</span> · <span style="color:#88aaff">寬</span> · <span style="color:#aa88ff">紫巨/黑災 必躲坑</span>
+  <span style="color:#88ff66">綠 Lv3+</span> / <span style="color:#5588ff">藍標準 Lv6+</span> / <span style="color:#ff5050">紅快 Lv6+</span> /
+  <span style="color:#aa88ff">紫巨 Lv9+</span> / <span style="color:#cc99ff">黑災難 Lv15+</span> 跳得過去就免躲坑
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -479,14 +479,20 @@ const NUM_ZONES      = 10;
 const SAFETY_LINE_Z  = 5;
 
 // Wave catalog — colour × height × width × speed gives visual & tactical variety
+// Heights tuned so jump-peak = 20 * jump^2 lines up with these tiers:
+// green Lv 3 (peak 8.7) / blue/red/wide Lv 6 (16.2) / purple Lv 9 (26) / titan Lv 15 (52.5)
 const WAVE_TYPES = [
-  { id:'green',  name:'矮浪',  color:0x44dd44, height:3.0, width:14, speedMul:1.0, weight:18, lethal:'jumpable',   storm:false },
-  { id:'blue',   name:'標準',  color:0x1565c0, height:6,   width:18, speedMul:1.0, weight:30, lethal:'normal',     storm:false },
-  { id:'red',    name:'快浪',  color:0xc62828, height:7,   width:14, speedMul:1.8, weight:18, lethal:'normal',     storm:false },
-  { id:'wide',   name:'寬浪',  color:0x1976d2, height:6,   width:32, speedMul:0.85,weight:14, lethal:'normal',     storm:false },
-  { id:'purple', name:'巨浪',  color:0x6a1b9a, height:14,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:8,  lethal:'fullscreen', storm:true },
-  { id:'titan',  name:'災難',  color:0x4a148c, height:22,  width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:3,  lethal:'fullscreen', storm:true },
+  { id:'green',  name:'矮浪',  color:0x44dd44, height:8,  width:14, speedMul:1.0, weight:18, lethal:'jumpable',   storm:false },
+  { id:'blue',   name:'標準',  color:0x1565c0, height:15, width:18, speedMul:1.0, weight:30, lethal:'normal',     storm:false },
+  { id:'red',    name:'快浪',  color:0xc62828, height:15, width:14, speedMul:1.8, weight:18, lethal:'normal',     storm:false },
+  { id:'wide',   name:'寬浪',  color:0x1976d2, height:15, width:32, speedMul:0.85,weight:14, lethal:'normal',     storm:false },
+  { id:'purple', name:'巨浪',  color:0x6a1b9a, height:25, width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:8,  lethal:'fullscreen', storm:true },
+  { id:'titan',  name:'災難',  color:0x4a148c, height:50, width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:3,  lethal:'fullscreen', storm:true },
 ];
+// Required jump Lv to clear a given height (h+0.3 margin)
+function reqJumpLv(h){
+  return Math.max(0, Math.ceil((Math.sqrt((h + 0.3) / 20) - 0.42) / 0.08));
+}
 function pickWaveType(stormBoost){
   let total = 0;
   for (const w of WAVE_TYPES) total += w.weight * (stormBoost && w.storm ? 3.5 : 1);
@@ -1863,12 +1869,13 @@ function updateHUD(){
 let warnTimer = null;
 function showWarn(waveType){
   sfx.warn();
+  const lv = reqJumpLv(waveType.height);
   let label, color;
-  if (waveType.lethal === 'fullscreen') { label = `${waveType.name}！必躲坑！`; color = '#ff8800'; }
-  else if (waveType.lethal === 'jumpable') { label = `${waveType.name}（可跳過）`; color = '#88ff66'; }
-  else if (waveType.id === 'red') { label = `${waveType.name}（速！）`; color = '#ff5050'; }
-  else if (waveType.id === 'wide') { label = `${waveType.name}（很寬）`; color = '#5588ff'; }
-  else { label = `${waveType.name}海嘯`; color = '#ff3030'; }
+  if (waveType.lethal === 'fullscreen') { label = `${waveType.name}！躲坑或跳 Lv${lv}+`; color = '#ff8800'; }
+  else if (waveType.lethal === 'jumpable') { label = `${waveType.name}（跳 Lv${lv}+ 可過）`; color = '#88ff66'; }
+  else if (waveType.id === 'red') { label = `${waveType.name}！(快 / 跳 Lv${lv}+)`; color = '#ff5050'; }
+  else if (waveType.id === 'wide') { label = `${waveType.name}（很寬 / 跳 Lv${lv}+）`; color = '#5588ff'; }
+  else { label = `${waveType.name}海嘯（跳 Lv${lv}+）`; color = '#ff3030'; }
   hud.warn.textContent = label;
   hud.warn.style.color = color;
   hud.warn.classList.add('show');
@@ -2589,8 +2596,8 @@ function update(now){
       const dx = player.position.x - ts.obj.group.position.x;
       const halfW = ts.obj.wallW / 2;
       if (Math.abs(dz) < 2.4 && Math.abs(dx) < halfW){
-        if (ts.waveType.lethal === 'jumpable' && player.position.y > ts.waveType.height + 0.3){
-          // safely vaulted over the low wave
+        if (player.position.y > ts.waveType.height + 0.3){
+          // jumped clean over the wave (works for any type if jump high enough)
         } else {
           killPlayer();
         }
@@ -3325,7 +3332,7 @@ const PALETTES = {
 };
 const TUTORIAL_STEPS = [
   '用 WASD（或左下搖桿）跑出基地，撿沿途的金幣。深區金幣更值錢。',
-  '看到「海嘯警報」就反應：綠色矮浪 → 跳躍越過；紫色巨浪 / 黑色災難 → 跳進坑裡躲。',
+  '看到「海嘯警報」會顯示需要的跳高 Lv。跳得夠高就跳過去（綠浪 Lv3 / 藍紅 Lv6 / 紫巨 Lv9 / 黑災 Lv15）；不夠就躲坑。',
   '坑現在是真的洞 — 跳進去（按 Space）、海嘯過後再跳出來。坑緣顏色標記需要的跳高 Lv（棕 / 綠 / 藍 / 紫 / 紅 …）',
   '跳高不夠的坑「走不過去」— 整個坑當成牆，得繞開或回基地升級跳高。',
   '活著回到山頂（金色光柱）→ 自動把背包換成存款。按 B 開商店升級裝備。',
