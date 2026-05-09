@@ -691,21 +691,29 @@ stickEl.addEventListener('pointerdown', e => {
   const r = stickEl.getBoundingClientRect();
   stickCenter = { x: r.left + r.width/2, y: r.top + r.height/2 };
   setStickFromXY(e.clientX, e.clientY);
-  stickEl.setPointerCapture(e.pointerId);
+  try { stickEl.setPointerCapture(e.pointerId); } catch(_) {}
 });
-stickEl.addEventListener('pointermove', e => {
+// Move / up / cancel are window-level so dragging off the stick or releasing
+// over another element still updates / resets — fixes "stuck pointing up" on mobile
+window.addEventListener('pointermove', e => {
   if (e.pointerId !== stickPointerId) return;
-  e.preventDefault();
   setStickFromXY(e.clientX, e.clientY);
 });
 const endStick = e => {
-  if (e.pointerId !== stickPointerId) return;
+  if (e && e.pointerId !== undefined && e.pointerId !== stickPointerId) return;
   stickPointerId = null;
   resetStick();
 };
-stickEl.addEventListener('pointerup', endStick);
-stickEl.addEventListener('pointercancel', endStick);
-stickEl.addEventListener('pointerleave', endStick);
+window.addEventListener('pointerup', endStick);
+window.addEventListener('pointercancel', endStick);
+// Touch-event fallback for browsers where pointer events are flaky:
+// if all fingers are off the screen, the stick must be released
+window.addEventListener('touchend', e => {
+  if (stickPointerId !== null && e.touches.length === 0) endStick();
+}, { passive: true });
+window.addEventListener('touchcancel', () => {
+  if (stickPointerId !== null) endStick();
+}, { passive: true });
 
 function bindTouchButton(id, onPress, onRelease){
   const el = document.getElementById(id);
