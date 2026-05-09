@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### 新（Phase 1A 多人連線）
+- **多人連線正式啟用**：`PARTYKIT_HOST` 設為 `etfm.cooldragon313.partykit.dev`
 - **PartyKit server**（`party/server.js`）做位置中繼，所有玩家共用一個 `global` 房間
 - 看得到其他玩家：客戶端建出他人的角色模型（套他們選的造型），頭上有名牌
 - 進場 / 離場 toast，內插平滑移動，斷線後 5 秒自動重連
