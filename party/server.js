@@ -4,13 +4,16 @@
 // what the server tells them; coin pickups race through the server so first
 // player to claim wins.
 
-const RUNWAY_LEN     = 1000;
+const RUNWAY_LEN     = 2000;
 const RUNWAY_HALF_W  = 20;
 const ZONE_LEN       = 200;
-const NUM_ZONES      = 5;
+const NUM_ZONES      = 10;
 const HILL_START_Z   = 4;
 const COIN_RESPAWN_MS = 60_000;
 const POWERUP_RESPAWN_MS = 45_000;
+const BIG_TREASURE_RESPAWN_MS = 600_000;   // 10 minutes
+const BIG_TREASURE_VALUE = 50;
+const BIG_TREASURE_Z = -1000;             // boundary of old map / start of new content
 
 const WAVE_TYPES = [
   { id:'green',  height:3.0, width:14, speedMul:1.0,  weight:18, storm:false },
@@ -52,6 +55,13 @@ export default class WorldServer {
     // Death chests dropped on player death (shared — any player can grab)
     this.chests = [];
     this.nextChestId = 1;
+    // Big treasure (one global instance, 10-min respawn, $50)
+    this.bigTreasure = {
+      available: true,
+      respawnAt: 0,
+      x: 0, z: BIG_TREASURE_Z,
+      value: BIG_TREASURE_VALUE,
+    };
     this.lastTick = Date.now();
     this.tickHandle = setInterval(() => this.tick(), 50);
   }
@@ -109,6 +119,16 @@ export default class WorldServer {
         this.broadcast({ type: 'coin_respawn', id: c.id });
       }
     }
+    // Big treasure respawn
+    if (!this.bigTreasure.available && this.bigTreasure.respawnAt && now >= this.bigTreasure.respawnAt){
+      this.bigTreasure.available = true;
+      this.bigTreasure.respawnAt = 0;
+      this.broadcast({
+        type: 'big_treasure_spawn',
+        x: this.bigTreasure.x, z: this.bigTreasure.z, value: this.bigTreasure.value,
+      });
+    }
+
     // Powerup respawn (re-randomize type each respawn so distribution mixes)
     for (const p of this.powerups){
       if (!p.available && p.respawnAt && now >= p.respawnAt){
@@ -217,6 +237,9 @@ export default class WorldServer {
       chests: this.chests.filter(c => c.available).map(c => ({
         id: c.id, x: c.x, z: c.z, value: c.value, slots: c.slots,
       })),
+      bigTreasure: this.bigTreasure.available ? {
+        x: this.bigTreasure.x, z: this.bigTreasure.z, value: this.bigTreasure.value,
+      } : null,
       waves: this.waves,
       storm: this.storm,
     }));
@@ -301,6 +324,17 @@ export default class WorldServer {
         id: chest.id, x: chest.x, z: chest.z,
         value, slots, ownerName: chest.ownerName,
       });
+    } else if (msg.type === 'big_treasure_attempt'){
+      if (this.bigTreasure.available){
+        this.bigTreasure.available = false;
+        this.bigTreasure.respawnAt = Date.now() + BIG_TREASURE_RESPAWN_MS;
+        this.broadcast({
+          type: 'big_treasure_picked',
+          byId: sender.id,
+          byName: player.name,
+          value: this.bigTreasure.value,
+        });
+      }
     } else if (msg.type === 'chest_pickup_attempt'){
       const c = this.chests.find(x => x.id === msg.chestId);
       if (!c || !c.available) return;

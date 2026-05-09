@@ -223,6 +223,14 @@
       </div>
     </div>
     <div class="creator-row">
+      <label>身材</label>
+      <div class="swatches" data-field="body">
+        <span class="swatch style" data-val="thin">瘦（快）</span>
+        <span class="swatch style" data-val="normal">標準</span>
+        <span class="swatch style" data-val="large">壯（慢）</span>
+      </div>
+    </div>
+    <div class="creator-row">
       <label>膚色</label>
       <div class="swatches" data-field="skin"></div>
     </div>
@@ -360,10 +368,10 @@ const PARTYKIT_HOST = 'etfm.cooldragon313.partykit.dev';
 const MP_ROOM = 'global';
 const MP_ENABLED = !!PARTYKIT_HOST;
 
-const RUNWAY_LEN     = 1000;
+const RUNWAY_LEN     = 2000;
 const RUNWAY_HALF_W  = 20;          // 40 person-widths total
 const ZONE_LEN       = 200;
-const NUM_ZONES      = 5;
+const NUM_ZONES      = 10;
 const SAFETY_LINE_Z  = 5;
 
 // Wave catalog — colour × height × width × speed gives visual & tactical variety
@@ -483,7 +491,10 @@ for (let z = 10; z > -RUNWAY_LEN; z -= 26){
 }
 
 // Difficulty zone stripes (colored bands across runway)
-const zoneColors = [0x44aa44, 0x88aa44, 0xaa8844, 0xaa4444, 0x6644aa];
+const zoneColors = [
+  0x44aa44, 0x88aa44, 0xaa8844, 0xaa4444, 0x6644aa,
+  0xff8800, 0xeed040, 0x40dddd, 0xff66bb, 0x111111
+];
 for (let i = 0; i < NUM_ZONES; i++){
   const stripe = mkPlane(RUNWAY_HALF_W*2, 1.4, zoneColors[i]);
   stripe.position.set(0, 0.04, -(i + 1) * ZONE_LEN);
@@ -599,6 +610,42 @@ function scatterSpilloverCoins(cx, cz, count, totalValue){
   }
 }
 
+// ----- Big treasure (one global, $50, 10-min respawn) -----
+let bigTreasureMesh = null, bigTreasureAttempting = false, bigTreasurePos = { x:0, z:-1000 };
+function spawnBigTreasureMesh(x, z){
+  removeBigTreasureMesh();
+  const g = new THREE.Group();
+  const chest = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 1.6, 2),
+    new THREE.MeshBasicMaterial({ color: 0xffd700, fog: false })
+  );
+  chest.position.y = 0.8;
+  g.add(chest);
+  // bright vertical beacon
+  const beam = new THREE.Mesh(
+    new THREE.BoxGeometry(0.7, 14, 0.7),
+    new THREE.MeshBasicMaterial({ color: 0xffee66, fog: false, transparent: true, opacity: 0.6 })
+  );
+  beam.position.y = 8;
+  g.add(beam);
+  const sparkle = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0, 1.0, 1.0),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false })
+  );
+  sparkle.position.y = 15;
+  g.add(sparkle);
+  g.userData.chest = chest;
+  g.position.set(x, 0, z);
+  scene.add(g);
+  bigTreasureMesh = g;
+  bigTreasurePos = { x, z };
+  bigTreasureAttempting = false;
+}
+function removeBigTreasureMesh(){
+  if (bigTreasureMesh){ scene.remove(bigTreasureMesh); bigTreasureMesh = null; }
+  bigTreasureAttempting = false;
+}
+
 // ----- Power-ups (speed boost, etc) -----
 const powerups = [];
 const POWERUP_VISUALS = {
@@ -673,7 +720,10 @@ if (!MP_ENABLED){
 // ============================================================
 const pits = [];
 // Zone-coloured rims hint at the jump-level required to enter each pit
-const PIT_RIM_COLORS = [0x6a4a2a, 0x4a8a4a, 0x4a4aaa, 0x8a4aaa, 0xc04040];
+const PIT_RIM_COLORS = [
+  0x6a4a2a, 0x4a8a4a, 0x4a4aaa, 0x8a4aaa, 0xc04040,
+  0xff8800, 0xeed040, 0x40dddd, 0xff66bb, 0x111111
+];
 function spawnPits(){
   let z = -50;
   while (z > -RUNWAY_LEN + 20){
@@ -705,8 +755,11 @@ const DEFAULT_CUSTOM = {
   name: '勇者',
   hair: 'short',     hairColor: 0x3a2a1a,
   expression: 'smile',
+  body: 'normal',    // 'thin' | 'normal' | 'large'
   skin: 0xf0c090, shirt: 0xd04040, pants: 0x1a1a4a, shoes: 0x5a3a1a,
 };
+const BODY_SCALES = { thin: 0.85, normal: 1.0, large: 1.3 };
+const BODY_SPEED_MUL = { thin: 1.10, normal: 1.0, large: 0.85 };
 
 function buildAvatar(custom){
   custom = custom || DEFAULT_CUSTOM;
@@ -749,6 +802,9 @@ function buildPlayer(custom){
   const built = buildAvatar(custom || DEFAULT_CUSTOM);
   player = built.group;
   legL = built.legL; legR = built.legR; armL = built.armL; armR = built.armR;
+  // Apply body-size scaling uniformly so big body is visibly bigger
+  const s = BODY_SCALES[(custom && custom.body) || 'normal'] || 1.0;
+  player.scale.set(s, s, s);
   player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
   scene.add(player);
 }
@@ -1216,6 +1272,7 @@ function update(now){
     }
     const sprint = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.5 : 1.0;
     const buff = (t < state.buffSpeedUntil) ? 1.5 : 1.0;
+    const bodyMul = BODY_SPEED_MUL[(state.custom && state.custom.body) || 'normal'] || 1.0;
     if (!state.inPit && (mx !== 0 || mz !== 0)){
       if (!analog){
         const len = Math.hypot(mx, mz);
@@ -1226,7 +1283,7 @@ function update(now){
       const sy = Math.sin(state.cameraYaw);
       const worldMx =  mx * cy + mz * sy;
       const worldMz = -mx * sy + mz * cy;
-      const sp = state.speed * 60 * dt * sprint * buff;
+      const sp = state.speed * 60 * dt * sprint * buff * bodyMul;
       player.position.x += worldMx * sp;
       player.position.z += worldMz * sp;
       // Face direction of motion
@@ -1328,6 +1385,25 @@ function update(now){
           scene.remove(c.mesh);
           sfx.coin();
         }
+      }
+    }
+  }
+
+  // ----- Big treasure pickup -----
+  if (state.alive && bigTreasureMesh){
+    const dx = player.position.x - bigTreasurePos.x;
+    const dz = player.position.z - bigTreasurePos.z;
+    if (dx*dx + dz*dz < 4 && !bigTreasureAttempting){
+      if (mpAuthoritative && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+        bigTreasureAttempting = true;
+        mpSocket.send(JSON.stringify({ type: 'big_treasure_attempt' }));
+      } else {
+        // Solo mode: pick directly
+        state.money += 50;
+        toast('★ 大寶箱 +$50 直接入帳！');
+        sfx.bigCoin();
+        removeBigTreasureMesh();
+        saveProgress();
       }
     }
   }
@@ -1560,6 +1636,12 @@ function update(now){
       c.mesh.rotation.y = t * 2 + c.x * 0.3;
       c.mesh.position.y = 0.7 + Math.sin(t * 3 + c.x) * 0.12;
     }
+  }
+
+  // ----- Big treasure animation -----
+  if (bigTreasureMesh){
+    const c = bigTreasureMesh.userData.chest;
+    if (c){ c.rotation.y = t * 1.2; c.position.y = 0.8 + Math.sin(t * 2) * 0.15; }
   }
 
   // ----- Powerup animation: spin only the cube; beam stays upright -----
@@ -1964,6 +2046,8 @@ function mpHandleMessage(raw){
       (msg.powerups || []).forEach(addPowerupFromServer);
       clearAllChests();
       (msg.chests || []).forEach(addChestFromServer);
+      removeBigTreasureMesh();
+      if (msg.bigTreasure) spawnBigTreasureMesh(msg.bigTreasure.x, msg.bigTreasure.z);
       for (const ts of tsunamis) scene.remove(ts.obj.group);
       tsunamis.length = 0;
       msg.waves.forEach(addServerWave);
@@ -2063,6 +2147,22 @@ function mpHandleMessage(raw){
   } else if (msg.type === 'coin_spawn'){
     // Server spawned a fresh coin (e.g. spillover from a chest pickup)
     addCoinFromServer(msg.coin);
+  } else if (msg.type === 'big_treasure_spawn'){
+    spawnBigTreasureMesh(msg.x, msg.z);
+    toast('★ 大寶箱重新出現！($' + msg.value + ')');
+  } else if (msg.type === 'big_treasure_picked'){
+    removeBigTreasureMesh();
+    if (msg.byId === mpMyId){
+      state.money += (msg.value ?? 50);
+      hud.money.classList.remove('flash');
+      void hud.money.offsetWidth;
+      hud.money.classList.add('flash');
+      toast(`★ 大寶箱 +$${msg.value} 直接入帳！`);
+      sfx.bigCoin();
+      saveProgress();
+    } else {
+      toast(`${msg.byName || '某人'} 搶到大寶箱（+$${msg.value}）`);
+    }
   } else if (msg.type === 'powerup_respawn'){
     const p = powerups.find(x => x.id === msg.id);
     if (p){
