@@ -7,6 +7,9 @@
 
 ### 修
 - **音效靜音按鈕點不到**：HUD 整層設了 `pointer-events: none` 讓玩家可以點背後的遊戲畫面，連帶擋住了內部按鈕的點擊。在 `#audio-toggle` 上加 `pointer-events: auto` 例外讓它可以收到點擊。
+
+### 新
+- **BGM 多檔輪播**：建立 `assets/bgm/` 資料夾。把 mp3 命名 `01.mp3, 02.mp3 … 12.mp3` 放進去，會自動依編號順序播放並循環，每首結束接下一首。原本的 `assets/bgm.mp3` 仍當第一首播放。
 - 客戶端會偵測 server 是否為 Phase 1B（看 init 訊息有沒有 coins / waves 陣列）。如果遇到舊版 server（只認位置中繼），自動切回本地金幣 / 海嘯生成，避免「金幣和海嘯都不見」的空畫面狀況。
 
 ### 新

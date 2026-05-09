@@ -1498,28 +1498,63 @@ const sfx = {
   baseEnter:  () => tone({freq:880, type:'triangle', duration:0.10, volume:0.14}),
 };
 
-// --- BGM (optional file at assets/bgm.mp3) ---
-const bgm = new Audio();
-bgm.loop = true;
-bgm.preload = 'auto';
-bgm.src = 'assets/bgm.mp3';
-let bgmLoaded = false, bgmPlaying = false, bgmRequested = false;
-bgm.addEventListener('canplaythrough', () => {
-  bgmLoaded = true;
-  if (bgmRequested) startBgm();
-}, { once: true });
-bgm.addEventListener('error', () => { bgmLoaded = false; }, { once: true });
+// --- BGM (drop files in assets/bgm/ as 01.mp3, 02.mp3, … — they auto-cycle) ---
+const BGM_PROBE_PATHS = ['assets/bgm.mp3'];
+for (let i = 1; i <= 12; i++) BGM_PROBE_PATHS.push(`assets/bgm/${String(i).padStart(2,'0')}.mp3`);
+
+const bgmCandidates = BGM_PROBE_PATHS.map(path => {
+  const a = new Audio();
+  a.preload = 'auto';
+  a.src = path;
+  return a;
+});
+const bgmTracks = [];          // available tracks in probe order
+let bgmCurrent = null, bgmCurrentIdx = -1, bgmRequested = false;
+
+bgmCandidates.forEach((a, idx) => {
+  a.addEventListener('canplaythrough', () => {
+    if (bgmTracks.includes(a)) return;
+    // Insert in probe-order so playback follows 01 → 02 → 03 …
+    let pos = bgmTracks.length;
+    for (let i = 0; i < bgmTracks.length; i++){
+      if (bgmCandidates.indexOf(bgmTracks[i]) > idx){ pos = i; break; }
+    }
+    bgmTracks.splice(pos, 0, a);
+    if (bgmRequested && !bgmCurrent) startBgm();
+  }, { once: true });
+  a.addEventListener('error', () => {});
+  a.addEventListener('ended', () => {
+    if (bgmCurrent !== a) return;
+    advanceBgm();
+  });
+});
+
 function startBgm(){
   if (!audioPrefs.enabled) return;
-  bgmRequested = true;          // remember the user has already gestured
-  if (!bgmLoaded || bgmPlaying) return;
-  bgm.volume = 0.28 * audioPrefs.volume;
-  bgm.play().then(() => { bgmPlaying = true; }).catch(() => {});
+  bgmRequested = true;
+  if (bgmCurrent || bgmTracks.length === 0) return;
+  bgmCurrentIdx = 0;
+  const t = bgmTracks[bgmCurrentIdx];
+  t.currentTime = 0;
+  t.volume = 0.28 * audioPrefs.volume;
+  t.play().then(() => { bgmCurrent = t; }).catch(() => {});
+}
+function advanceBgm(){
+  if (bgmTracks.length === 0) return;
+  bgmCurrent = null;
+  bgmCurrentIdx = (bgmCurrentIdx + 1) % bgmTracks.length;
+  const next = bgmTracks[bgmCurrentIdx];
+  next.currentTime = 0;
+  next.volume = 0.28 * audioPrefs.volume;
+  next.play().then(() => { bgmCurrent = next; }).catch(() => {});
 }
 function refreshAudioVolumes(){
-  if (bgmPlaying){
-    if (audioPrefs.enabled) bgm.volume = 0.28 * audioPrefs.volume;
-    else { bgm.pause(); bgmPlaying = false; }
+  if (!bgmCurrent) return;
+  if (audioPrefs.enabled){
+    bgmCurrent.volume = 0.28 * audioPrefs.volume;
+    if (bgmCurrent.paused) bgmCurrent.play().catch(() => {});
+  } else {
+    bgmCurrent.pause();
   }
 }
 
