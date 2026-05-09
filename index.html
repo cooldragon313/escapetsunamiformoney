@@ -116,7 +116,16 @@
   body.menu-mode #hilltop-prompt,
   body.menu-mode #warn,
   body.menu-mode #toast,
-  body.menu-mode #player-list { display: none !important; }
+  body.menu-mode #player-list,
+  body.menu-mode #resource-bar { display: none !important; }
+  #resource-bar { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+                  background: rgba(0,0,0,0.65); border: 2px solid #444;
+                  padding: 8px 18px; display: flex; gap: 22px;
+                  font-family: monospace; font-size: 16px; color: #fff;
+                  pointer-events: none; z-index: 30; }
+  #resource-bar .res { display: flex; align-items: center; gap: 6px; }
+  #resource-bar .ico { color: #ffd700; }
+  #resource-bar #res-money { color: #ffd700; font-weight: bold; }
   #player-list { position: fixed; top: 60px; right: 12px;
                  background: rgba(0,0,0,0.55); border: 2px solid #444;
                  padding: 8px 12px; min-width: 130px; max-width: 200px;
@@ -181,6 +190,13 @@
 </head>
 <body>
 <div id="stage"></div>
+
+<div id="resource-bar">
+  <span class="res"><span class="ico">$</span><span id="res-money">0</span></span>
+  <span class="res"><span class="ico">🪵</span><span id="res-wood">0</span></span>
+  <span class="res"><span class="ico">🪨</span><span id="res-stone">0</span></span>
+  <span class="res"><span class="ico">⚙️</span><span id="res-iron">0</span></span>
+</div>
 
 <div id="title-screen" class="overlay">
   <div class="overlay-card">
@@ -350,7 +366,7 @@
   <kbd>Space</kbd> 跳躍 ·
   <kbd>Shift</kbd> 衝刺 ·
   <kbd>B</kbd> 商店（山頂） ·
-  <kbd>右鍵拖曳</kbd> 轉鏡頭 / <kbd>R</kbd> 復位 ·
+  <kbd>右鍵拖曳</kbd> 轉鏡頭 / <kbd>滾輪</kbd>/兩指捏合 縮放 / <kbd>R</kbd> 復位 ·
   跳到坑裡躲海嘯 · 跳出來爬出去 · 跳高 Lv 不夠的坑會擋路、走不過去 ·
   <span style="color:#88ff66">綠色矮浪可直接跳過</span> ·
   <span style="color:#5588ff">藍標準</span> · <span style="color:#ff5050">紅快</span> · <span style="color:#88aaff">寬</span> · <span style="color:#aa88ff">紫巨/黑災 必躲坑</span>
@@ -1042,8 +1058,44 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyR' && !shopOpen){
     state.cameraYaw = 0;
     state.cameraPitch = 0.55;
+    state.cameraDist = 9.5;
   }
 });
+
+// Mouse wheel zoom
+stageEl.addEventListener('wheel', e => {
+  e.preventDefault();
+  state.cameraDist = Math.max(4, Math.min(25, state.cameraDist + e.deltaY * 0.012));
+}, { passive: false });
+
+// Pinch-zoom for touch (two-finger gesture)
+const pinchPointers = new Map();
+let pinchPrevDist = 0;
+stageEl.addEventListener('pointerdown', e => {
+  if (e.target.closest && (e.target.closest('#stick') || e.target.closest('.touch-btn'))) return;
+  if (e.pointerType === 'touch') pinchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+});
+window.addEventListener('pointermove', e => {
+  if (!pinchPointers.has(e.pointerId)) return;
+  pinchPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinchPointers.size >= 2){
+    const arr = Array.from(pinchPointers.values()).slice(0, 2);
+    const d = Math.hypot(arr[0].x - arr[1].x, arr[0].y - arr[1].y);
+    if (pinchPrevDist > 0){
+      const delta = d - pinchPrevDist;
+      state.cameraDist = Math.max(4, Math.min(25, state.cameraDist - delta * 0.04));
+    }
+    pinchPrevDist = d;
+    // Cancel any single-pointer rotation drag while pinching
+    if (camDragId !== null) camDragId = null;
+  }
+});
+const endPinch = e => {
+  pinchPointers.delete(e.pointerId);
+  if (pinchPointers.size < 2) pinchPrevDist = 0;
+};
+window.addEventListener('pointerup', endPinch);
+window.addEventListener('pointercancel', endPinch);
 
 // ============================================================
 // STATE
@@ -1061,6 +1113,7 @@ const state = {
   pickupRadius: STATS_BASE.pickupRadius,
   carryMax: STATS_BASE.carryMax,
   upgrades: { speed:0, jump:0, diveTime:0, pickupRadius:0, carryMax:0 },
+  wood: 0, stone: 0, iron: 0,    // crafting materials (private to player)
   alive: true,
   maxDist: 0,
   spawnAccum: 0,
@@ -1068,7 +1121,8 @@ const state = {
   custom: DEFAULT_CUSTOM,
   tutorialStep: 0,
   cameraYaw: 0,                 // orbit angle around player (0 = behind)
-  cameraPitch: 0.55,            // elevation angle (0 = horizontal, π/2 = top-down)
+  cameraPitch: 0.55,            // elevation angle
+  cameraDist: 9.5,              // zoom distance (4 = close-up, 25 = far)
   buffSpeedUntil: 0,            // local-time seconds; speed boost active while t < this
   buffJumpUntil: 0,
   buffMagnetUntil: 0,
@@ -1080,6 +1134,22 @@ const state = {
   stormCooldownUntil: 25,      // earliest time (in t-seconds) for first storm
   stormBonusMultiplier: 1,
 };
+
+// Random material drop on coin pickup. Shallow zones favour wood,
+// mid favour stone, deep favour iron.
+function rollMaterialDrop(coinValue){
+  if (Math.random() >= 0.07) return;
+  const zone = Math.max(0, Math.min(9, (coinValue || 1) - 1));   // value 1 = zone 0
+  const r = Math.random();
+  let mat;
+  if (zone < 4)      mat = r < 0.65 ? 'wood' : r < 0.92 ? 'stone' : 'iron';
+  else if (zone < 7) mat = r < 0.30 ? 'wood' : r < 0.78 ? 'stone' : 'iron';
+  else               mat = r < 0.10 ? 'wood' : r < 0.45 ? 'stone' : 'iron';
+  state[mat]++;
+  saveProgress();
+  const label = mat === 'wood' ? '🪵 木頭' : mat === 'stone' ? '🪨 石頭' : '⚙️ 鐵';
+  toast(`+1 ${label}`);
+}
 
 function applyBuff(type){
   if (type === 'speed'){
@@ -1124,12 +1194,20 @@ const hud = {
   buffJump: document.getElementById('buff-jump'),
   buffMagnet: document.getElementById('buff-magnet'),
   bagValue: document.getElementById('bag-value'),
+  resMoney: document.getElementById('res-money'),
+  resWood: document.getElementById('res-wood'),
+  resStone: document.getElementById('res-stone'),
+  resIron: document.getElementById('res-iron'),
 };
 
 function updateHUD(){
   hud.money.textContent = state.money;
   hud.bag.textContent = `${state.bag} / ${state.carryMax}`;
   hud.bagValue.textContent = `$${state.bagValue}`;
+  hud.resMoney.textContent = state.money;
+  hud.resWood.textContent  = state.wood;
+  hud.resStone.textContent = state.stone;
+  hud.resIron.textContent  = state.iron;
   hud.stormIndicator.style.display = state.storm ? 'inline' : 'none';
   const fmt = v => v > 0 ? `${v.toFixed(1)} 秒` : '—';
   hud.buffSpeed.textContent  = fmt(state.buffSpeedUntil - t);
@@ -1409,6 +1487,7 @@ function update(now){
           c.collected = true;
           scene.remove(c.mesh);
           sfx.coin();
+          rollMaterialDrop(c.value);
         }
       }
     }
@@ -1680,8 +1759,8 @@ function update(now){
     }
   }
 
-  // ----- Camera follow (orbital, controlled by state.cameraYaw / cameraPitch) -----
-  const camRadius = 9.5;
+  // ----- Camera follow (orbital, controlled by state.cameraYaw / cameraPitch / cameraDist) -----
+  const camRadius = state.cameraDist;
   const cosP = Math.cos(state.cameraPitch);
   const sinP = Math.sin(state.cameraPitch);
   const camTargetX = player.position.x + Math.sin(state.cameraYaw) * camRadius * cosP;
@@ -1709,6 +1788,7 @@ function saveProgress(){
       money: state.money,
       upgrades: state.upgrades,
       maxDist: state.maxDist,
+      wood: state.wood, stone: state.stone, iron: state.iron,
     }));
   } catch(e){}
 }
@@ -1718,6 +1798,9 @@ function loadProgress(){
     if (!data) return;
     state.money   = data.money   || 0;
     state.maxDist = data.maxDist || 0;
+    state.wood    = data.wood    || 0;
+    state.stone   = data.stone   || 0;
+    state.iron    = data.iron    || 0;
     Object.assign(state.upgrades, data.upgrades || {});
   } catch(e){}
 }
@@ -2153,6 +2236,7 @@ function mpHandleMessage(raw){
       state.bag += 1;
       state.bagValue += (msg.value ?? c.value) * lootMul;
       sfx.coin();
+      rollMaterialDrop(msg.value ?? c.value);
     } else if (msg.byName){
       // brief feedback so the other player isn't invisible
       // (only when they grab one near you — skipped here to avoid toast spam)
