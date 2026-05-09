@@ -609,25 +609,28 @@ const POWERUP_VISUALS = {
 function makePowerupMesh(type){
   const v = POWERUP_VISUALS[type] || POWERUP_VISUALS.speed;
   const g = new THREE.Group();
+  // Cube — this rotates (set in animation); kept as a child so it spins
+  // independently of the upright beam
   const cube = new THREE.Mesh(
     new THREE.BoxGeometry(1.4, 1.4, 1.4),
     new THREE.MeshBasicMaterial({ color: v.color, fog: false })
   );
-  cube.position.y = 0;
+  cube.position.y = 0.7;
   g.add(cube);
-  // Tall beacon column visible from far away
+  g.userData.cube = cube;
+  // Static vertical beam (does NOT rotate — fix for the "invisible beam" report)
   const beam = new THREE.Mesh(
     new THREE.BoxGeometry(0.5, 6, 0.5),
-    new THREE.MeshBasicMaterial({ color: v.emissive, fog: false, transparent: true, opacity: 0.65 })
+    new THREE.MeshBasicMaterial({ color: v.emissive, fog: false, transparent: true, opacity: 0.7 })
   );
-  beam.position.y = 3.2;
+  beam.position.y = 4;
   g.add(beam);
   // White cap on top
   const cap = new THREE.Mesh(
-    new THREE.BoxGeometry(0.7, 0.4, 0.7),
+    new THREE.BoxGeometry(0.8, 0.4, 0.8),
     new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false })
   );
-  cap.position.y = 6.3;
+  cap.position.y = 7.2;
   g.add(cap);
   return g;
 }
@@ -1559,12 +1562,15 @@ function update(now){
     }
   }
 
-  // ----- Powerup animation (spin + bob) -----
+  // ----- Powerup animation: spin only the cube; beam stays upright -----
   for (const p of powerups){
     if (p.collected || !p.mesh) continue;
-    p.mesh.rotation.y = t * 2.5 + p.x * 0.2;
-    p.mesh.rotation.x = t * 1.4;
-    p.mesh.position.y = 1.0 + Math.sin(t * 3 + p.x) * 0.25;
+    const cube = p.mesh.userData && p.mesh.userData.cube;
+    if (cube){
+      cube.rotation.y = t * 2.5 + p.x * 0.2;
+      cube.rotation.x = t * 1.4;
+      cube.position.y = 0.7 + Math.sin(t * 3 + p.x) * 0.25;
+    }
   }
 
   // ----- Camera follow (orbital, controlled by state.cameraYaw / cameraPitch) -----
