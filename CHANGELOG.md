@@ -4,6 +4,7 @@
 
 ### 修
 - **選完角色又跳回選角色（死循環）**：title-continue 不管有沒有 active profile 都直接顯示「選擇角色」清單，所以登入後重整看 reload 又跳到選擇。改成：有 active profile 就直接進遊戲；想切換用標題畫面新加的「切換 / 新增角色」小按鈕。
+- **遊戲完全進不去**（空白畫面 / 點開始無反應）：上一版 `renderLeaderboard()` 在啟動時被呼叫，但裡面讀的 `scoreboardData` 用 `let` 宣告還在 temporal dead zone → 整個 script 從那行起就掛了。拿掉啟動時的 render 呼叫（之後 init / scoreboard_update 訊息來時自然會 render）。
 
 ### 新
 - **🏆 排行榜**：右上角顯示「最遠紀錄」前 5 名，自己金色高亮。

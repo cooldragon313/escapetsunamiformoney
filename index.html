@@ -472,7 +472,7 @@
 
 <div id="leaderboard">
   <div class="title">🏆 最遠紀錄</div>
-  <div id="leaderboard-items"></div>
+  <div id="leaderboard-items"><div class="empty">載入中…</div></div>
 </div>
 
 <div id="warn">海 嘯 警 報</div>
@@ -2879,7 +2879,8 @@ loadProgress();
 
 applyStats();
 updateHUD();
-renderLeaderboard();
+// (renderLeaderboard runs later on init/scoreboard_update — calling it now
+//  hits a TDZ on scoreboardData and breaks startup.)
 
 // Save on tab close / refresh as a safety net
 window.addEventListener('beforeunload', saveProgress);
