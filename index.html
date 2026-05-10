@@ -324,6 +324,12 @@
       <strong>你能跑到 1000 公尺嗎？</strong>
     </div>
     <button id="title-continue">開始冒險 →</button>
+    <button id="title-switch" type="button"
+            style="background: transparent; border: 1px dashed #555;
+                   color: #888; font-size: 12px; padding: 4px 14px; margin-top: 8px;
+                   letter-spacing: 1px;">
+      切換 / 新增角色
+    </button>
   </div>
 </div>
 
@@ -3690,11 +3696,32 @@ document.querySelectorAll('.swatches').forEach(group => {
   });
 });
 
-// --- Title -> Profile picker (or straight to Creator if no profiles yet) ---
+// Helper: finalise creator/profile flow → enter the actual game
+function enterGameFromMenu(){
+  buildPlayer(state.custom);
+  refreshPlayerList();
+  if (mpSocket && mpSocket.readyState === WebSocket.OPEN) mpSendIdentify();
+  if (localStorage.getItem('etfm-tutorial') === 'yes'){
+    state.gamePhase = 'playing';
+    setMenuMode(false);
+  } else {
+    state.gamePhase = 'tutorial';
+    state.tutorialStep = 0;
+    show('tutorial-screen');
+    renderTutorialStep();
+  }
+  mpConnect();
+}
+
+// --- Title -> game (if active profile exists) / picker / first-time creator ---
 document.getElementById('title-continue').addEventListener('click', () => {
   getAudioCtx();
   startBgm();
   hide('title-screen');
+  if (state.activeProfile){
+    enterGameFromMenu();
+    return;
+  }
   if (listProfiles().length > 0){
     state.gamePhase = 'profile';
     show('profile-screen');
@@ -3705,6 +3732,16 @@ document.getElementById('title-continue').addEventListener('click', () => {
     show('creator-screen');
     applyCustomToUI();
   }
+});
+
+// Title's '切換 / 新增角色' button — explicit way to reach the picker
+document.getElementById('title-switch').addEventListener('click', () => {
+  getAudioCtx();
+  startBgm();
+  hide('title-screen');
+  state.gamePhase = 'profile';
+  show('profile-screen');
+  renderProfileList();
 });
 
 // --- Profile picker ---

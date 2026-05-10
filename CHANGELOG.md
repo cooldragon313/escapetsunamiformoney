@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 修
+- **選完角色又跳回選角色（死循環）**：title-continue 不管有沒有 active profile 都直接顯示「選擇角色」清單，所以登入後重整看 reload 又跳到選擇。改成：有 active profile 就直接進遊戲；想切換用標題畫面新加的「切換 / 新增角色」小按鈕。
+
 ### 新
 - **🏆 排行榜**：右上角顯示「最遠紀錄」前 5 名，自己金色高亮。
   - Server 端持久化（PartyKit Durable Object 的 `room.storage`），即使所有人都離線了紀錄也會留著。
