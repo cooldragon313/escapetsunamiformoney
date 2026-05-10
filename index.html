@@ -185,10 +185,25 @@
   body.menu-mode #warn,
   body.menu-mode #toast,
   body.menu-mode #player-list,
+  body.menu-mode #leaderboard,
   body.menu-mode #resource-bar,
   body.menu-mode #chat-log,
   body.menu-mode #chat-input,
   body.menu-mode #chat-hint { display: none !important; }
+  #leaderboard { position: fixed; top: 230px; right: 12px;
+                 background: rgba(0,0,0,0.55); border: 2px solid #ffd700;
+                 padding: 8px 12px; min-width: 160px; max-width: 220px;
+                 font-family: monospace; font-size: 12px; line-height: 1.6;
+                 pointer-events: none; }
+  #leaderboard .title { color: #ffd700; font-weight: bold; margin-bottom: 4px;
+                        letter-spacing: 2px; }
+  #leaderboard .row { display: flex; gap: 6px; align-items: baseline; }
+  #leaderboard .row .rank { color: #888; width: 26px; }
+  #leaderboard .row .name { flex: 1; color: #cfd8e8; overflow: hidden;
+                            text-overflow: ellipsis; white-space: nowrap; }
+  #leaderboard .row .dist { color: #ffd700; font-size: 11px; }
+  #leaderboard .row.me .name { color: #ffd700; font-weight: bold; }
+  #leaderboard .empty { color: #888; font-style: italic; }
   #chat-log { position: fixed; bottom: 50px; left: 12px;
               max-width: 360px; pointer-events: none;
               font-family: monospace; font-size: 13px;
@@ -447,6 +462,11 @@
 <div id="player-list">
   <div class="title">線上玩家</div>
   <div id="player-list-items"></div>
+</div>
+
+<div id="leaderboard">
+  <div class="title">🏆 最遠紀錄</div>
+  <div id="leaderboard-items"></div>
 </div>
 
 <div id="warn">海 嘯 警 報</div>
@@ -2752,6 +2772,7 @@ function update(now){
   // Multiplayer (interpolate others + send our state)
   tickMultiplayer(dt);
   tickChatBubbles();
+  if (state.gamePhase === 'playing') maybeReportScore();
 
   if (state.gamePhase === 'playing') updateHUD();
   renderer.render(scene, camera);
@@ -2852,6 +2873,7 @@ loadProgress();
 
 applyStats();
 updateHUD();
+renderLeaderboard();
 
 // Save on tab close / refresh as a safety net
 window.addEventListener('beforeunload', saveProgress);
@@ -3100,6 +3122,37 @@ function spawnOtherPlayer(p){
   refreshPlayerList();
 }
 
+// ----- Leaderboard (server-tracked, persisted via DO storage) -----
+let scoreboardData = [];
+let lastReportedMaxDist = 0;
+
+function renderLeaderboard(){
+  const el = document.getElementById('leaderboard-items');
+  if (!el) return;
+  if (!scoreboardData.length){
+    el.innerHTML = '<div class="empty">尚無紀錄</div>';
+    return;
+  }
+  const myName = state.custom?.name || '';
+  el.innerHTML = scoreboardData.slice(0, 5).map((s, i) => {
+    const cls = s.name === myName ? 'me' : '';
+    return `<div class="row ${cls}">` +
+      `<span class="rank">#${i + 1}</span>` +
+      `<span class="name">${escapeHtml(s.name || '???')}</span>` +
+      `<span class="dist">${Math.round(s.maxDist || 0)}m</span>` +
+    `</div>`;
+  }).join('');
+}
+
+function maybeReportScore(){
+  // Throttled: only send when we've cleared at least 5 m of new ground
+  if (state.maxDist <= lastReportedMaxDist + 5) return;
+  lastReportedMaxDist = state.maxDist;
+  if (mpSocket && mpSocket.readyState === WebSocket.OPEN){
+    mpSocket.send(JSON.stringify({ type: 'score', maxDist: state.maxDist }));
+  }
+}
+
 function refreshPlayerList(){
   const el = document.getElementById('player-list-items');
   if (!el) return;
@@ -3312,6 +3365,11 @@ function mpHandleMessage(raw){
       (msg.chests || []).forEach(addChestFromServer);
       removeBigTreasureMesh();
       if (msg.bigTreasure) spawnBigTreasureMesh(msg.bigTreasure.x, msg.bigTreasure.z);
+      // Initial scoreboard snapshot
+      if (Array.isArray(msg.scoreboard)){
+        scoreboardData = msg.scoreboard;
+        renderLeaderboard();
+      }
       // Sync plots
       if (Array.isArray(msg.plots)){
         msg.plots.forEach(srvP => {
@@ -3433,6 +3491,9 @@ function mpHandleMessage(raw){
     addCoinFromServer(msg.coin);
   } else if (msg.type === 'chat'){
     receiveChat({ id: msg.id, name: msg.name, text: msg.text });
+  } else if (msg.type === 'scoreboard_update'){
+    scoreboardData = Array.isArray(msg.scoreboard) ? msg.scoreboard : [];
+    renderLeaderboard();
   } else if (msg.type === 'plot_owned'){
     const p = PLOTS.find(x => x.id === msg.plotId);
     if (p){

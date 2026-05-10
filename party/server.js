@@ -82,8 +82,43 @@ export default class WorldServer {
         }
       }
     }
+    // Leaderboard (persisted in DO storage)
+    this.scoreboard = [];
+    this.scoreboardDirty = false;
+    this.scoreboardLastSave = 0;
+    if (this.room && this.room.storage){
+      try {
+        Promise.resolve(this.room.storage.get('scoreboard')).then(s => {
+          if (Array.isArray(s)){
+            this.scoreboard = s;
+            this.broadcast({ type: 'scoreboard_update', scoreboard: this.scoreboard });
+          }
+        }).catch(() => {});
+      } catch(e) {}
+    }
     this.lastTick = Date.now();
     this.tickHandle = setInterval(() => this.tick(), 50);
+  }
+
+  sortAndBroadcastScoreboard(){
+    this.scoreboard.sort((a, b) => b.maxDist - a.maxDist);
+    this.scoreboard = this.scoreboard.slice(0, 20);
+    this.scoreboardDirty = true;
+    this.broadcast({ type: 'scoreboard_update', scoreboard: this.scoreboard });
+  }
+  recordScore(name, dist){
+    if (!name || dist <= 0) return;
+    const existing = this.scoreboard.find(s => s.name === name);
+    if (existing){
+      if (dist > existing.maxDist){
+        existing.maxDist = dist;
+        existing.when = Date.now();
+        this.sortAndBroadcastScoreboard();
+      }
+    } else {
+      this.scoreboard.push({ name, maxDist: dist, when: Date.now() });
+      this.sortAndBroadcastScoreboard();
+    }
   }
 
   spawnInitialPowerups(){
@@ -221,6 +256,15 @@ export default class WorldServer {
       }
     }
 
+    // Persist scoreboard at most once every 5s while there are pending changes
+    if (this.scoreboardDirty && (now - this.scoreboardLastSave) > 5000){
+      this.scoreboardLastSave = now;
+      this.scoreboardDirty = false;
+      if (this.room && this.room.storage){
+        try { Promise.resolve(this.room.storage.put('scoreboard', this.scoreboard)).catch(()=>{}); } catch(e){}
+      }
+    }
+
     // Wave removal once past hill base
     for (let i = this.waves.length - 1; i >= 0; i--){
       const w = this.waves[i];
@@ -264,6 +308,7 @@ export default class WorldServer {
       plots: this.plots.map(p => ({
         id: p.id, ownerId: p.ownerId, ownerName: p.ownerName, build: p.build,
       })),
+      scoreboard: this.scoreboard.slice(0, 10),
       waves: this.waves,
       storm: this.storm,
     }));
@@ -426,6 +471,8 @@ export default class WorldServer {
         }
       }
       this.chests = this.chests.filter(x => x.id !== c.id);
+    } else if (msg.type === 'score'){
+      this.recordScore(player.name, +msg.maxDist || 0);
     } else if (msg.type === 'chat'){
       const text = String(msg.text || '').slice(0, 120);
       if (!text) return;

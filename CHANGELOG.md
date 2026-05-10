@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### 新
+- **🏆 排行榜**：右上角顯示「最遠紀錄」前 5 名，自己金色高亮。
+  - Server 端持久化（PartyKit Durable Object 的 `room.storage`），即使所有人都離線了紀錄也會留著。
+  - 玩家每跑 5m 就回報新的最遠距離給 server，同名以最高紀錄為準（top 20 保留）。
+  - 進場時 init 訊息含初始 scoreboard，之後有變動 server 廣播 `scoreboard_update`。
+  - 持久化每 5 秒最多寫一次（避免 CF storage hammer）。
+
 ## 2026-05-10
 
 ### 新（多人連線）
