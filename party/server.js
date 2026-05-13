@@ -14,7 +14,7 @@ const RUNWAY_HALF_W  = 20;
 const ZONE_LEN       = 200;
 const NUM_ZONES      = 10;
 const HILL_START_Z   = 4;
-const COIN_RESPAWN_MS = 60_000;
+const COIN_RESPAWN_MS = 30_000;   // was 60s — half the wait so cap fills faster
 const POWERUP_RESPAWN_MS = 45_000;
 const BIG_TREASURE_RESPAWN_MS = 600_000;   // 10 minutes
 const BIG_TREASURE_VALUE = 50;
@@ -380,7 +380,9 @@ export default class WorldServer {
     for (let zone = 0; zone < NUM_ZONES; zone++){
       const zStart = -(zone) * ZONE_LEN - 15;
       const zEnd   = -(zone + 1) * ZONE_LEN + 5;
-      const count  = 14 + zone * 10;
+      // Front-zone bonus so early players have enough cash for first upgrades.
+      // zone 0:32 / 1:38 / 2:44 / 3:50 / 4:56 / ... / 9:106
+      const count  = 16 + zone * 10 + Math.max(0, 4 - zone) * 4;
       const value  = 1 + zone;
       for (let i = 0; i < count; i++){
         this.coins.push({
