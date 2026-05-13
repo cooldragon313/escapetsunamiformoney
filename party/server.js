@@ -814,11 +814,11 @@ export default class WorldServer {
       if (!this.lastPunch) this.lastPunch = new Map();
       this.lastPunch.set(sender.id, now);
       const dist = Math.sqrt(distSq) || 1;
-      // Strength scales knockback: base 30 + 8 per level
-      // With client decay ~0.15/sec, distance ≈ magnitude / 1.9 units
-      // Lv 0 ≈ 16m, Lv 5 ≈ 37m, Lv 10 ≈ 58m (across most of runway)
+      // Strength scales knockback: base 80 + 20 per level
+      // With client decay ~0.05/sec (k≈3), distance ≈ magnitude / 3 units
+      // Lv 0 ≈ 27m, Lv 5 ≈ 60m, Lv 10 ≈ 93m
       const strengthLv = Math.max(0, Math.min(20, +msg.strength || 0));
-      const magnitude = 30 + strengthLv * 8;
+      const magnitude = 80 + strengthLv * 20;
       this.broadcast({
         type: 'punch_hit',
         attackerId: sender.id, attackerName: player.name,
