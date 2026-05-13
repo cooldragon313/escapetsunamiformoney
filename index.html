@@ -382,6 +382,7 @@
       <div class="auth-tab active" data-mode="login">登入</div>
       <div class="auth-tab" data-mode="register">註冊</div>
     </div>
+    <form id="auth-form" onsubmit="return false;" autocomplete="on">
     <div class="auth-field">
       <label>帳號</label>
       <input id="auth-username" type="text" maxlength="16" autocomplete="username"
@@ -400,7 +401,8 @@
     </div>
     <div id="auth-error" class="auth-error"></div>
     <div id="auth-status" class="auth-status"></div>
-    <button id="auth-submit" type="button">登入</button>
+    <button id="auth-submit" type="submit">登入</button>
+    </form>
     <div class="auth-bottom">忘了密碼？目前沒辦法救回，建議用好記的</div>
   </div>
 </div>

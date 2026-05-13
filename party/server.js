@@ -22,7 +22,7 @@ const BIG_TREASURE_Z = -1000;             // boundary of old map / start of new 
 
 const TOKEN_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;   // 90 days
 const PRE_AUTH_TIMEOUT_MS = 15_000;                  // drop connections that don't auth quickly
-const PBKDF2_ITERATIONS = 120_000;
+const PBKDF2_ITERATIONS = 100_000;   // Cloudflare Workers caps PBKDF2 at 100k
 
 // Heights kept in sync with the client; server only uses speedMul / width
 // for spawn calculations.
@@ -248,6 +248,17 @@ export default class WorldServer {
   // HTTP: register / login / me
   // ============================================================
   async onRequest(req){
+    try {
+      return await this._onRequest(req);
+    } catch (e) {
+      console.error('[onRequest crash]', e && (e.stack || e.message || e));
+      return jsonResponse({
+        error: 'server_crash',
+        message: String((e && e.message) || e || 'unknown'),
+      }, 500);
+    }
+  }
+  async _onRequest(req){
     if (req.method === 'OPTIONS'){
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
