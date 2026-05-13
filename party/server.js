@@ -3,6 +3,11 @@
 // Phase 1B: server owns coins, tsunamis, and the storm cycle. Clients render
 // what the server tells them; coin pickups race through the server so first
 // player to claim wins.
+//
+// Phase 2 (this file): account auth. Username/password registration via HTTP,
+// HMAC-signed session token, WebSocket connections must auth before joining.
+// Profile (custom + progress) is persisted server-side keyed by userId, so
+// players can log in on any device and impersonation is blocked.
 
 const RUNWAY_LEN     = 2000;
 const RUNWAY_HALF_W  = 20;
@@ -14,6 +19,10 @@ const POWERUP_RESPAWN_MS = 45_000;
 const BIG_TREASURE_RESPAWN_MS = 600_000;   // 10 minutes
 const BIG_TREASURE_VALUE = 50;
 const BIG_TREASURE_Z = -1000;             // boundary of old map / start of new content
+
+const TOKEN_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;   // 90 days
+const PRE_AUTH_TIMEOUT_MS = 15_000;                  // drop connections that don't auth quickly
+const PBKDF2_ITERATIONS = 120_000;
 
 // Heights kept in sync with the client; server only uses speedMul / width
 // for spawn calculations.
@@ -34,6 +43,121 @@ function pickWaveType(stormBoost){
     if (r <= 0) return w;
   }
   return WAVE_TYPES[1];
+}
+
+// ============================================================
+// AUTH HELPERS
+// ============================================================
+
+function normalizeUsername(s){
+  return String(s || '').trim().toLowerCase();
+}
+function isValidUsername(s){
+  return /^[a-z0-9_]{3,16}$/.test(s);
+}
+function isValidDisplayName(s){
+  if (typeof s !== 'string') return false;
+  const t = s.trim();
+  return t.length >= 1 && t.length <= 16;
+}
+function isValidPassword(s){
+  return typeof s === 'string' && s.length >= 6 && s.length <= 128;
+}
+
+function bytesToB64(bytes){
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+function b64ToBytes(b64){
+  const padded = b64 + '==='.slice((b64.length + 3) % 4);
+  const s = atob(padded);
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+  return bytes;
+}
+function b64url(b64){
+  return b64.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function b64urlToStd(s){
+  return s.replace(/-/g, '+').replace(/_/g, '/');
+}
+
+async function hashPassword(password, saltB64){
+  const enc = new TextEncoder();
+  const salt = saltB64 ? b64ToBytes(b64urlToStd(saltB64))
+                       : crypto.getRandomValues(new Uint8Array(16));
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    keyMaterial, 256
+  );
+  return {
+    hash: b64url(bytesToB64(new Uint8Array(bits))),
+    salt: b64url(bytesToB64(salt)),
+  };
+}
+
+async function getHmacKey(secret){
+  return await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']
+  );
+}
+
+async function signToken(userId, secret){
+  const payload = { u: userId, e: Date.now() + TOKEN_EXPIRY_MS };
+  const payloadB64 = b64url(bytesToB64(new TextEncoder().encode(JSON.stringify(payload))));
+  const key = await getHmacKey(secret);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payloadB64));
+  return payloadB64 + '.' + b64url(bytesToB64(new Uint8Array(sig)));
+}
+
+async function verifyToken(token, secret){
+  if (!token || typeof token !== 'string' || token.indexOf('.') < 0) return null;
+  const [payloadB64, sigB64] = token.split('.');
+  if (!payloadB64 || !sigB64) return null;
+  try {
+    const key = await getHmacKey(secret);
+    const ok = await crypto.subtle.verify(
+      'HMAC', key,
+      b64ToBytes(b64urlToStd(sigB64)),
+      new TextEncoder().encode(payloadB64)
+    );
+    if (!ok) return null;
+    const payloadJson = new TextDecoder().decode(b64ToBytes(b64urlToStd(payloadB64)));
+    const payload = JSON.parse(payloadJson);
+    if (!payload || !payload.u) return null;
+    if (payload.e && payload.e < Date.now()) return null;
+    return payload.u;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getSecret(room){
+  const env = (room && room.env)
+           || (room && room.context && room.context.env)
+           || (typeof process !== 'undefined' && process.env);
+  const s = env && env.AUTH_SECRET;
+  if (s) return s;
+  console.warn('AUTH_SECRET not set — using insecure default. Run `partykit env push AUTH_SECRET` to fix.');
+  return 'dev-insecure-secret-please-replace';
+}
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+function jsonResponse(obj, status){
+  return new Response(JSON.stringify(obj), {
+    status: status || 200,
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
 }
 
 export default class WorldServer {
@@ -64,8 +188,8 @@ export default class WorldServer {
       x: 0, z: BIG_TREASURE_Z,
       value: BIG_TREASURE_VALUE,
     };
-    // Plots: 9-tile grid behind the base. ownerId is the connection id of the
-    // current owner (or null if for sale).
+    // Plots: 9-tile grid behind the base. ownerId is the userId (stable across
+    // sessions) of the owner, or null if for sale.
     this.plots = [];
     {
       let pid = 1;
@@ -82,41 +206,140 @@ export default class WorldServer {
         }
       }
     }
-    // Leaderboard (persisted in DO storage)
+    // Leaderboard (persisted in DO storage). New format keys on userId so
+    // names can change without losing your slot, and impostors can't poach
+    // someone else's row. Old name-keyed format is discarded on load.
     this.scoreboard = [];
     this.scoreboardDirty = false;
     this.scoreboardLastSave = 0;
     if (this.room && this.room.storage){
       try {
         Promise.resolve(this.room.storage.get('scoreboard')).then(s => {
-          if (Array.isArray(s)){
+          if (Array.isArray(s) && s.every(e => e && typeof e.userId === 'string')){
             this.scoreboard = s;
             this.broadcast({ type: 'scoreboard_update', scoreboard: this.scoreboard });
+          } else if (Array.isArray(s) && s.length > 0){
+            // Legacy entries — clear them now that auth is required
+            try { this.room.storage.delete('scoreboard'); } catch(e){}
+          }
+        }).catch(() => {});
+        // Also load plot ownership (now keyed by userId so it survives reconnects)
+        Promise.resolve(this.room.storage.get('plots')).then(p => {
+          if (Array.isArray(p)){
+            for (const saved of p){
+              const plot = this.plots.find(x => x.id === saved.id);
+              if (plot && saved.ownerId){
+                plot.ownerId = saved.ownerId;
+                plot.ownerName = saved.ownerName || '';
+                plot.build = saved.build || plot.build;
+              }
+            }
           }
         }).catch(() => {});
       } catch(e) {}
     }
+    this.plotsDirty = false;
+    this.plotsLastSave = 0;
     this.lastTick = Date.now();
     this.tickHandle = setInterval(() => this.tick(), 50);
   }
 
+  // ============================================================
+  // HTTP: register / login / me
+  // ============================================================
+  async onRequest(req){
+    if (req.method === 'OPTIONS'){
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+    const url = new URL(req.url);
+    const last = url.pathname.split('/').filter(Boolean).pop() || '';
+    const secret = getSecret(this.room);
+
+    if (last === 'register' && req.method === 'POST'){
+      let body;
+      try { body = await req.json(); }
+      catch(e){ return jsonResponse({ error:'bad_json', message:'資料格式錯誤' }, 400); }
+      const username = normalizeUsername(body.username);
+      const rawDisplay = String(body.displayName || body.username || '').trim();
+      const displayName = rawDisplay.slice(0, 16);
+      const password = String(body.password || '');
+      if (!isValidUsername(username))
+        return jsonResponse({ error:'username_invalid', message:'帳號只能用 3-16 個英數字或底線' }, 400);
+      if (!isValidDisplayName(displayName))
+        return jsonResponse({ error:'displayname_invalid', message:'顯示名稱要 1-16 字' }, 400);
+      if (!isValidPassword(password))
+        return jsonResponse({ error:'password_invalid', message:'密碼至少 6 字' }, 400);
+
+      const existing = await this.room.storage.get('user:' + username);
+      if (existing)
+        return jsonResponse({ error:'username_taken', message:'這個帳號已被註冊' }, 409);
+
+      const { hash, salt } = await hashPassword(password);
+      const userData = {
+        username, displayName, hash, salt,
+        createdAt: Date.now(),
+        profile: null,
+      };
+      await this.room.storage.put('user:' + username, userData);
+      const token = await signToken(username, secret);
+      return jsonResponse({ ok:true, token, username, displayName });
+    }
+
+    if (last === 'login' && req.method === 'POST'){
+      let body;
+      try { body = await req.json(); }
+      catch(e){ return jsonResponse({ error:'bad_json', message:'資料格式錯誤' }, 400); }
+      const username = normalizeUsername(body.username);
+      const password = String(body.password || '');
+      if (!username || !password)
+        return jsonResponse({ error:'missing', message:'請輸入帳號和密碼' }, 400);
+      const user = await this.room.storage.get('user:' + username);
+      if (!user)
+        return jsonResponse({ error:'bad_credentials', message:'帳號或密碼錯誤' }, 401);
+      const { hash } = await hashPassword(password, user.salt);
+      if (hash !== user.hash)
+        return jsonResponse({ error:'bad_credentials', message:'帳號或密碼錯誤' }, 401);
+      const token = await signToken(username, secret);
+      return jsonResponse({ ok:true, token, username, displayName: user.displayName });
+    }
+
+    if (last === 'me' && req.method === 'GET'){
+      const auth = req.headers.get('authorization') || '';
+      const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+      const userId = await verifyToken(token, secret);
+      if (!userId) return jsonResponse({ error:'bad_token' }, 401);
+      const user = await this.room.storage.get('user:' + userId);
+      if (!user) return jsonResponse({ error:'no_user' }, 404);
+      return jsonResponse({
+        ok: true, username: user.username, displayName: user.displayName,
+        profile: user.profile || null,
+      });
+    }
+
+    return jsonResponse({ error:'not_found' }, 404);
+  }
+
+  // ============================================================
+  // Scoreboard
+  // ============================================================
   sortAndBroadcastScoreboard(){
     this.scoreboard.sort((a, b) => b.maxDist - a.maxDist);
     this.scoreboard = this.scoreboard.slice(0, 20);
     this.scoreboardDirty = true;
     this.broadcast({ type: 'scoreboard_update', scoreboard: this.scoreboard });
   }
-  recordScore(name, dist){
-    if (!name || dist <= 0) return;
-    const existing = this.scoreboard.find(s => s.name === name);
+  recordScore(userId, displayName, dist){
+    if (!userId || dist <= 0) return;
+    const existing = this.scoreboard.find(s => s.userId === userId);
     if (existing){
+      existing.displayName = displayName;
       if (dist > existing.maxDist){
         existing.maxDist = dist;
         existing.when = Date.now();
         this.sortAndBroadcastScoreboard();
       }
     } else {
-      this.scoreboard.push({ name, maxDist: dist, when: Date.now() });
+      this.scoreboard.push({ userId, displayName, maxDist: dist, when: Date.now() });
       this.sortAndBroadcastScoreboard();
     }
   }
@@ -207,8 +430,9 @@ export default class WorldServer {
       this.broadcast({ type: 'storm_end' });
     }
 
-    // Wave spawning (only if at least one player is in danger zone)
-    if (this.players.size > 0){
+    // Wave spawning (only if at least one authed player is in danger zone)
+    const authedPlayers = Array.from(this.players.values()).filter(p => p.authed);
+    if (authedPlayers.length > 0){
       this.spawnAccum += dt;
       if (this.spawnAccum > this.nextSpawnIn){
         this.spawnAccum = 0;
@@ -222,9 +446,9 @@ export default class WorldServer {
         }
         this.nextSpawnIn *= 0.9;   // +10% spawn rate vs previous tuning
 
-        // Use the deepest player to set difficulty
+        // Use the deepest authed player to set difficulty
         let minZ = 8;
-        for (const p of this.players.values()) if (p.z < minZ) minZ = p.z;
+        for (const p of authedPlayers) if (p.z < minZ) minZ = p.z;
 
         // Only actually spawn if at least one player has crossed safety line
         if (minZ < 5){
@@ -264,6 +488,19 @@ export default class WorldServer {
         try { Promise.resolve(this.room.storage.put('scoreboard', this.scoreboard)).catch(()=>{}); } catch(e){}
       }
     }
+    // Persist plot ownership similarly
+    if (this.plotsDirty && (now - this.plotsLastSave) > 5000){
+      this.plotsLastSave = now;
+      this.plotsDirty = false;
+      if (this.room && this.room.storage){
+        try {
+          const snap = this.plots.map(p => ({
+            id: p.id, ownerId: p.ownerId, ownerName: p.ownerName, build: p.build,
+          }));
+          Promise.resolve(this.room.storage.put('plots', snap)).catch(()=>{});
+        } catch(e){}
+      }
+    }
 
     // Wave removal once past hill base
     for (let i = this.waves.length - 1; i >= 0; i--){
@@ -282,17 +519,65 @@ export default class WorldServer {
   }
 
   onConnect(conn){
+    // Connection starts un-authed. We tell the client we need auth, then
+    // wait for an `auth` message with a valid token before adding them to
+    // the world. Anything else sent before that is ignored.
     const player = {
-      id: conn.id, name: '???', custom: null,
+      id: conn.id,
+      userId: null, displayName: null,
+      name: '???', custom: null,
       x: 0, y: 0, z: 8, ry: 0, moving: false, inPit: false,
+      authed: false,
     };
     this.players.set(conn.id, player);
 
-    // Send full world snapshot
+    try { conn.send(JSON.stringify({ type: 'auth_required' })); } catch(e){}
+
+    setTimeout(() => {
+      const p = this.players.get(conn.id);
+      if (p && !p.authed){
+        try { conn.send(JSON.stringify({ type: 'auth_timeout' })); } catch(e){}
+        try { conn.close(); } catch(e){}
+        this.players.delete(conn.id);
+      }
+    }, PRE_AUTH_TIMEOUT_MS);
+  }
+
+  async handleAuth(conn, msg){
+    const secret = getSecret(this.room);
+    const userId = await verifyToken(msg.token, secret);
+    if (!userId){
+      try { conn.send(JSON.stringify({ type: 'auth_failed', reason: 'bad_token' })); } catch(e){}
+      try { conn.close(); } catch(e){}
+      return false;
+    }
+    const user = await this.room.storage.get('user:' + userId);
+    if (!user){
+      try { conn.send(JSON.stringify({ type: 'auth_failed', reason: 'no_user' })); } catch(e){}
+      try { conn.close(); } catch(e){}
+      return false;
+    }
+    const player = this.players.get(conn.id);
+    if (!player) return false;
+    player.userId = userId;
+    player.displayName = user.displayName;
+    player.name = user.displayName;
+    player.custom = (user.profile && user.profile.custom) || null;
+    player.authed = true;
+
+    // Send the world snapshot now that we know who this is
     conn.send(JSON.stringify({
       type: 'init',
       yourId: conn.id,
-      players: Array.from(this.players.values()),
+      userId, displayName: user.displayName,
+      profile: user.profile || null,
+      players: Array.from(this.players.values())
+        .filter(p => p.authed && p.id !== conn.id)
+        .map(p => ({
+          id: p.id, name: p.name, custom: p.custom,
+          x: p.x, y: p.y, z: p.z, ry: p.ry,
+          moving: p.moving, inPit: p.inPit,
+        })),
       coins: this.coins.filter(c => c.available).map(c => ({
         id: c.id, x: c.x, z: c.z, value: c.value,
       })),
@@ -313,14 +598,28 @@ export default class WorldServer {
       storm: this.storm,
     }));
 
-    this.broadcast({ type: 'join', player }, [conn.id]);
+    this.broadcast({
+      type: 'join',
+      player: {
+        id: conn.id, name: player.name, custom: player.custom,
+        x: player.x, y: player.y, z: player.z, ry: player.ry,
+        moving: false, inPit: false,
+      },
+    }, [conn.id]);
+    return true;
   }
 
-  onMessage(raw, sender){
+  async onMessage(raw, sender){
     let msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
     const player = this.players.get(sender.id);
     if (!player) return;
+
+    // Pre-auth: only the `auth` message is honoured
+    if (!player.authed){
+      if (msg.type === 'auth') await this.handleAuth(sender, msg);
+      return;
+    }
 
     if (msg.type === 'state'){
       player.x = +msg.x || 0;
@@ -336,7 +635,7 @@ export default class WorldServer {
         moving: player.moving, inPit: player.inPit,
       }, [sender.id]);
     } else if (msg.type === 'identify'){
-      player.name = String(msg.name || '???').slice(0, 16);
+      // Display name is locked to the account. Cosmetics can update.
       player.custom = msg.custom || null;
       this.broadcast({
         type: 'identify',
@@ -344,6 +643,26 @@ export default class WorldServer {
         name: player.name,
         custom: player.custom,
       }, [sender.id]);
+      // Persist cosmetics into the user's profile so they survive reconnects
+      try {
+        const user = await this.room.storage.get('user:' + player.userId);
+        if (user){
+          user.profile = user.profile || {};
+          user.profile.custom = player.custom;
+          await this.room.storage.put('user:' + player.userId, user);
+        }
+      } catch(e){}
+    } else if (msg.type === 'profile_save'){
+      // Full progress snapshot from the client. Throttling is on the client.
+      try {
+        const user = await this.room.storage.get('user:' + player.userId);
+        if (!user) return;
+        user.profile = {
+          custom: msg.custom || (user.profile && user.profile.custom) || null,
+          progress: msg.progress || null,
+        };
+        await this.room.storage.put('user:' + player.userId, user);
+      } catch(e){}
     } else if (msg.type === 'pickup_attempt'){
       const coin = this.coins.find(c => c.id === msg.coinId);
       if (coin && coin.available){
@@ -358,7 +677,6 @@ export default class WorldServer {
           value: coin.value,
         });
         if (coin.spillover){
-          // Remove entirely so it never comes back
           this.coins = this.coins.filter(c => c.id !== coin.id);
         }
       }
@@ -396,21 +714,23 @@ export default class WorldServer {
     } else if (msg.type === 'plot_buy'){
       const plot = this.plots.find(p => p.id === msg.plotId);
       if (!plot || plot.ownerId) return;
-      plot.ownerId = sender.id;
+      plot.ownerId = player.userId;
       plot.ownerName = player.name;
       plot.build = { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
+      this.plotsDirty = true;
       this.broadcast({
         type: 'plot_owned',
         plotId: plot.id,
-        ownerId: sender.id,
+        ownerId: player.userId,
         ownerName: player.name,
       });
     } else if (msg.type === 'plot_build'){
       const plot = this.plots.find(p => p.id === msg.plotId);
-      if (!plot || plot.ownerId !== sender.id) return;
+      if (!plot || plot.ownerId !== player.userId) return;
       const slot = msg.slot;
       if (!['floor','walls','roof','furniture','decoration'].includes(slot)) return;
       plot.build[slot] = String(msg.itemId || '').slice(0, 32);
+      this.plotsDirty = true;
       this.broadcast({
         type: 'plot_built',
         plotId: plot.id,
@@ -472,7 +792,7 @@ export default class WorldServer {
       }
       this.chests = this.chests.filter(x => x.id !== c.id);
     } else if (msg.type === 'score'){
-      this.recordScore(player.name, +msg.maxDist || 0);
+      this.recordScore(player.userId, player.displayName, +msg.maxDist || 0);
     } else if (msg.type === 'chat'){
       const text = String(msg.text || '').slice(0, 120);
       if (!text) return;
@@ -486,8 +806,11 @@ export default class WorldServer {
   }
 
   onClose(conn){
+    const p = this.players.get(conn.id);
     this.players.delete(conn.id);
-    this.broadcast({ type: 'leave', id: conn.id });
+    if (p && p.authed){
+      this.broadcast({ type: 'leave', id: conn.id });
+    }
   }
 
   onError(conn, err){

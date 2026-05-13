@@ -198,17 +198,19 @@ server 權威，先到先贏，45 秒重生（重生會重新洗類型）。
 
 ---
 
-## 多角色（多 Profile）系統
+## 帳號系統（跨裝置）
 
-每瀏覽器 / 裝置可以建立多個獨立角色。
+雲端帳號：用同一個帳密在任何裝置登入，存款 / 升級 / 造型 / 房屋 / 排行榜紀錄全部同步。
 
-- 標題畫面 → 開始冒險 → 「**選擇角色**」清單
-- 點 ▶ 進入角色 / 點 ✕ 刪除
-- 「+ 新建角色」進創角畫面
-- 每個角色獨立紀錄存款 / 升級 / 造型 / 房屋 / 材料
-- 「⚠ 重置進度」只清當前角色，其他保留
+- 第一次玩 → 標題 → 註冊（帳號 3-16 個英數字底線，顯示名稱 1-16 字、之後不能改）
+- 已有帳號 → 標題 → 登入
+- 標題畫面下方「登出 / 切換帳號」清掉本機 token 後重新登入
+- 排行榜以帳號 ID 為主、顯示名稱備註，**他人無法冒用你的名字刷分**
+- 「⚠ 重置進度」會清掉伺服器上這個帳號的所有資料（帳號本身保留）
 
-存檔位置：`localStorage` 的 `etfm-profile-<名字>`。**不會跨裝置同步**（要做雲端同步要做後端持久層，目前沒做）。
+存檔位置：伺服器端的 PartyKit Durable Object storage，key 為 `user:<lowercase username>`。localStorage 只當作離線快取，**不再是真實來源**。
+
+> 沒有忘記密碼流程，請用記得住的密碼。
 
 ---
 
@@ -230,8 +232,14 @@ server 權威，先到先贏，45 秒重生（重生會重新洗類型）。
 
 ```bash
 npm install
-npx partykit login          # 第一次：GitHub OAuth
-npm run deploy              # 印出網址
+npx partykit login                              # 第一次：GitHub OAuth
+
+# 設定 auth 的 HMAC 簽章金鑰（不要外流；換 key 會讓全部 token 失效）
+npx partykit env add AUTH_SECRET                # 互動輸入隨機字串
+# 或一次塞：
+# echo "$(openssl rand -hex 32)" | npx partykit env add AUTH_SECRET
+
+npm run deploy                                  # 印出網址
 ```
 
 把網址（不含 `https://`）貼到 `index.html`：
@@ -240,11 +248,13 @@ npm run deploy              # 印出網址
 const PARTYKIT_HOST = 'etfm.<你的帳號>.partykit.dev';
 ```
 
-然後 `git push` 到 GitHub Pages。`PARTYKIT_HOST` 留空就退回單人模式。
+然後 `git push` 到 GitHub Pages。**留空 `PARTYKIT_HOST` 不再退回單人模式**——帳號系統需要伺服器，沒設好的話遊戲開不起來。
 
 ### 本機開發
 
 ```bash
+# 本機環境一樣需要 secret；用 .env 檔
+echo 'AUTH_SECRET=dev-only-replace-this' > .env
 npm run dev    # localhost:1999
 ```
 
@@ -268,7 +278,7 @@ npm run dev    # localhost:1999
 
 ## 路線圖（未做）
 
-- 雲端同步（跨裝置 / 排行榜）
+- 忘記密碼 / 改密碼流程
 - 房屋多家具 / 多裝飾槽位
 - 第 10 區掉特殊衣服 / 家具
 - 道具交易 / NPC 對話 / 任務系統

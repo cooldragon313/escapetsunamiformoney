@@ -172,6 +172,44 @@
                                padding: 6px 10px; }
   .profile-row button.danger:hover { background: #cc4444; }
   .profile-row button:hover:not(.danger) { background: #3a5a9a; }
+  /* --- Auth screen --- */
+  .auth-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+  .auth-tab  { flex: 1; padding: 10px; text-align: center;
+               background: rgba(0,0,0,0.3); color: #888;
+               border: 1px solid #333; cursor: pointer;
+               letter-spacing: 4px; font-size: 14px; }
+  .auth-tab.active { background: rgba(60,50,0,0.5); color: #ffd700;
+                     border-color: #ffd700; }
+  .auth-field { margin-bottom: 12px; }
+  .auth-field label { display: block; color: #aaa; font-size: 12px;
+                      letter-spacing: 3px; margin-bottom: 4px; }
+  .auth-field input { width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.4);
+                      border: 1px solid #555; color: #fff;
+                      font-family: monospace; font-size: 14px;
+                      box-sizing: border-box; }
+  .auth-field input:focus { outline: none; border-color: #ffd700; }
+  .auth-hint { color: #888; font-size: 11px; margin-top: 4px; line-height: 1.6; }
+  .auth-error { color: #ff5555; font-size: 13px; min-height: 18px;
+                margin: 8px 0; text-align: center; letter-spacing: 2px; }
+  .auth-status { color: #ffd700; font-size: 13px; min-height: 18px;
+                 margin: 8px 0; text-align: center; letter-spacing: 2px; }
+  #auth-submit { width: 100%; padding: 12px; background: #2a4a8a;
+                 border: 1px solid #88c0ff; color: #fff; cursor: pointer;
+                 font-family: monospace; font-size: 14px; letter-spacing: 4px;
+                 margin-top: 6px; }
+  #auth-submit:hover { background: #3a5a9a; }
+  #auth-submit:disabled { opacity: 0.5; cursor: wait; }
+  .auth-bottom { text-align: center; color: #666; font-size: 11px;
+                 margin-top: 18px; letter-spacing: 2px; }
+  /* Migration modal */
+  #migrate-screen .overlay-card { max-width: 480px; }
+  .migrate-row { padding: 8px 12px; margin-bottom: 4px;
+                 background: rgba(0,0,0,0.4); color: #fff;
+                 display: flex; align-items: center; gap: 10px;
+                 cursor: pointer; border: 1px solid #333; }
+  .migrate-row:hover { border-color: #ffd700; background: rgba(60,50,0,0.4); }
+  .migrate-row .mname { flex: 1; font-weight: bold; }
+  .migrate-row .mstats { color: #aaa; font-size: 12px; }
   #tutorial-text { font-size: 16px; line-height: 1.8; min-height: 80px;
                    color: #fff; padding: 16px; background: rgba(0,0,0,0.3);
                    border-left: 3px solid #88aaff; }
@@ -324,24 +362,61 @@
       <strong>你能跑到 1000 公尺嗎？</strong>
     </div>
     <button id="title-continue">開始冒險 →</button>
+    <div id="title-account-info" style="color:#888; font-size:11px; margin-top:10px; letter-spacing:1px;"></div>
     <button id="title-switch" type="button"
             style="background: transparent; border: 1px dashed #555;
-                   color: #888; font-size: 12px; padding: 4px 14px; margin-top: 8px;
+                   color: #888; font-size: 12px; padding: 4px 14px; margin-top: 4px;
                    letter-spacing: 1px;">
-      切換 / 新增角色
+      登出 / 切換帳號
     </button>
   </div>
 </div>
 
-<div id="profile-screen" class="overlay hidden">
+<div id="auth-screen" class="overlay hidden">
   <div class="overlay-card">
-    <h2>選擇角色</h2>
-    <p style="color:#aaa; text-align:center; font-size:13px; margin: 8px 0 14px">每個角色獨立紀錄存款 / 升級 / 造型 / 房屋</p>
-    <div id="profile-list"></div>
-    <button id="profile-new" type="button">+ 新建角色</button>
-    <button id="profile-back" type="button"
-            style="background: transparent; border: 1px dashed #555; color: #888; font-size: 12px; padding: 4px 14px; margin-top: 10px;">
-      ← 回標題
+    <h2>登入帳號</h2>
+    <p style="color:#aaa; text-align:center; font-size:12px; margin: 6px 0 14px">
+      用同一個帳號跨裝置遊玩，紀錄存在雲端
+    </p>
+    <div class="auth-tabs">
+      <div class="auth-tab active" data-mode="login">登入</div>
+      <div class="auth-tab" data-mode="register">註冊</div>
+    </div>
+    <div class="auth-field">
+      <label>帳號</label>
+      <input id="auth-username" type="text" maxlength="16" autocomplete="username"
+             placeholder="3-16 個英數字或底線">
+    </div>
+    <div class="auth-field" id="auth-display-field" style="display:none">
+      <label>顯示名稱</label>
+      <input id="auth-display" type="text" maxlength="16"
+             placeholder="排行榜上顯示的名字">
+      <div class="auth-hint">這個之後不能改，請慎選</div>
+    </div>
+    <div class="auth-field">
+      <label>密碼</label>
+      <input id="auth-password" type="password" maxlength="128" autocomplete="current-password"
+             placeholder="至少 6 字">
+    </div>
+    <div id="auth-error" class="auth-error"></div>
+    <div id="auth-status" class="auth-status"></div>
+    <button id="auth-submit" type="button">登入</button>
+    <div class="auth-bottom">忘了密碼？目前沒辦法救回，建議用好記的</div>
+  </div>
+</div>
+
+<div id="migrate-screen" class="overlay hidden">
+  <div class="overlay-card">
+    <h2>偵測到本機進度</h2>
+    <p style="color:#fff; text-align:center; font-size:13px; margin: 8px 0 16px; line-height: 1.7">
+      你的瀏覽器裡存了舊版角色資料。<br>
+      要把哪一個搬到這個帳號？
+    </p>
+    <div id="migrate-list" style="margin-bottom: 14px"></div>
+    <button id="migrate-skip" type="button"
+            style="background: transparent; border: 1px dashed #555; color: #888;
+                   font-size: 12px; padding: 6px 14px; margin: 6px auto 0;">
+      跳過（從零開始）
     </button>
   </div>
 </div>
@@ -1809,7 +1884,7 @@ const state = {
   alive: true,
   maxDist: 0,
   spawnAccum: 0,
-  gamePhase: 'title',          // 'title' | 'profile' | 'creator' | 'tutorial' | 'playing'
+  gamePhase: 'title',          // 'title' | 'auth' | 'creator' | 'tutorial' | 'playing'
   custom: DEFAULT_CUSTOM,
   tutorialStep: 0,
   activeProfile: '',           // currently-loaded profile name (= state.custom.name)
@@ -2051,7 +2126,7 @@ let buildShopPlot = null;     // currently-edited plot
 function getNearestOwnedPlot(){
   for (const p of PLOTS){
     if (!p.ownerId) continue;
-    const isMine = (mpMyId && p.ownerId === mpMyId) || p.ownerId === 'local';
+    const isMine = (myUserId && p.ownerId === myUserId) || p.ownerId === 'local';
     if (!isMine) continue;
     const dx = player.position.x - p.x;
     const dz = player.position.z - p.z;
@@ -2265,9 +2340,9 @@ document.getElementById('cos-redesign').addEventListener('click', () => {
   state.gamePhase = 'creator';
   setMenuMode(true);
   applyCustomToUI();
-  // Lock name field — redesign keeps the same profile
+  // Lock name field — display name is tied to the account
   const nameField = document.getElementById('name-input');
-  nameField.value = state.activeProfile || state.custom.name || '';
+  nameField.value = myDisplayName || state.custom.name || '';
   nameField.readOnly = true;
   toast('-$50 整套造型重選（不可改名）');
   updateHUD();
@@ -2575,7 +2650,7 @@ function update(now){
       const dx = player.position.x - p.x;
       const dz = player.position.z - p.z;
       const d = dx*dx + dz*dz;
-      const isMine = p.ownerId && ((mpMyId && p.ownerId === mpMyId) || p.ownerId === 'local');
+      const isMine = p.ownerId && ((myUserId && p.ownerId === myUserId) || p.ownerId === 'local');
       if (isMine && d < 6*6 && (!onMine || d < onMine._d)){ onMine = p; onMine._d = d; }
       if (!p.ownerId && d < bestSqU){ bestSqU = d; nearestUnowned = p; }
     }
@@ -2786,51 +2861,93 @@ function update(now){
 }
 
 // ============================================================
-// PROGRESS PERSISTENCE
+// AUTH (server-side accounts)
 // ============================================================
-// ---- Multi-profile save system ----
-function listProfiles(){
+// localStorage keys:
+//   etfm-token        : current session token (issued by server, HMAC-signed)
+//   etfm-username     : the lowercase username we're logged in as
+//   etfm-display      : cached display name (for the title screen blurb)
+//   etfm-cache-<user> : last known profile snapshot per user (offline fallback)
+let authToken = localStorage.getItem('etfm-token') || '';
+let myUserId  = localStorage.getItem('etfm-username') || '';
+let myDisplayName = localStorage.getItem('etfm-display') || '';
+let mpAuthed = false;          // set to true once the WS auth handshake completes
+
+function authBaseUrl(){
+  if (!PARTYKIT_HOST) return null;
+  const isLocal = PARTYKIT_HOST.startsWith('localhost');
+  const proto = isLocal ? 'http' : 'https';
+  return `${proto}://${PARTYKIT_HOST}/parties/main/${MP_ROOM}`;
+}
+async function apiRegister(username, displayName, password){
+  const r = await fetch(authBaseUrl() + '/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, displayName, password }),
+  });
+  return { status: r.status, body: await r.json().catch(() => ({})) };
+}
+async function apiLogin(username, password){
+  const r = await fetch(authBaseUrl() + '/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  return { status: r.status, body: await r.json().catch(() => ({})) };
+}
+function setSession(token, username, displayName){
+  authToken = token;
+  myUserId = username;
+  myDisplayName = displayName;
+  localStorage.setItem('etfm-token', token);
+  localStorage.setItem('etfm-username', username);
+  localStorage.setItem('etfm-display', displayName);
+  state.activeProfile = displayName;
+  if (state.custom) state.custom.name = displayName;
+}
+function clearSession(){
+  authToken = '';
+  myUserId = '';
+  myDisplayName = '';
+  mpAuthed = false;
+  localStorage.removeItem('etfm-token');
+  localStorage.removeItem('etfm-username');
+  localStorage.removeItem('etfm-display');
+  state.activeProfile = '';
+}
+
+// ============================================================
+// PROGRESS PERSISTENCE — server is source of truth
+// ============================================================
+// Legacy localStorage profile readers (kept ONLY for one-time migration when
+// a player who previously played locally signs up for the first time).
+function listLegacyProfiles(){
   try { return JSON.parse(localStorage.getItem('etfm-profiles') || '[]'); }
   catch(e){ return []; }
 }
-function getActiveProfileName(){ return localStorage.getItem('etfm-active') || ''; }
-function setActiveProfileName(n){ localStorage.setItem('etfm-active', n); }
-function loadProfileData(name){
+function loadLegacyProfileData(name){
   try { return JSON.parse(localStorage.getItem('etfm-profile-' + name) || 'null'); }
   catch(e){ return null; }
 }
-function saveProfileData(name, data){
-  if (!name) return;
-  localStorage.setItem('etfm-profile-' + name, JSON.stringify(data));
-  const list = listProfiles();
-  if (!list.includes(name)){
-    list.push(name);
-    localStorage.setItem('etfm-profiles', JSON.stringify(list));
-  }
-}
-function deleteProfileData(name){
-  localStorage.removeItem('etfm-profile-' + name);
-  const list = listProfiles().filter(n => n !== name);
-  localStorage.setItem('etfm-profiles', JSON.stringify(list));
-  if (getActiveProfileName() === name) localStorage.removeItem('etfm-active');
-}
-// Migrate the old single-save layout into a profile keyed by its name
-function migrateLegacySave(){
-  if (listProfiles().length > 0) return;
+function migrateLegacySingleSave(){
+  // Pre-multi-profile layout — promote it to a named profile so it shows up
+  // in the migration picker.
+  if (listLegacyProfiles().length > 0) return;
   let custom = null, progress = null;
   try { custom   = JSON.parse(localStorage.getItem('etfm-custom')   || 'null'); } catch(e){}
   try { progress = JSON.parse(localStorage.getItem('etfm-progress') || 'null'); } catch(e){}
   if (!custom && !progress) return;
   const name = (custom && custom.name) || '勇者';
-  saveProfileData(name, { custom: custom || {}, progress: progress || {} });
-  setActiveProfileName(name);
+  try {
+    localStorage.setItem('etfm-profile-' + name,
+      JSON.stringify({ custom: custom || {}, progress: progress || {} }));
+    localStorage.setItem('etfm-profiles', JSON.stringify([name]));
+  } catch(e){}
 }
+migrateLegacySingleSave();
 
-function saveProgress(){
-  const name = state.activeProfile || (state.custom && state.custom.name);
-  if (!name) return;
-  state.activeProfile = name;
-  saveProfileData(name, {
+function snapshotProfile(){
+  return {
     custom: state.custom,
     progress: {
       money: state.money,
@@ -2839,32 +2956,52 @@ function saveProgress(){
       wood: state.wood, stone: state.stone, iron: state.iron,
       cosmeticsOwned: state.cosmeticsOwned,
     },
-  });
+  };
 }
-function loadProgress(){
-  migrateLegacySave();
-  const name = getActiveProfileName();
-  if (!name) return false;
-  const data = loadProfileData(name);
-  if (!data) return false;
-  state.activeProfile = name;
-  if (data.custom) state.custom = { ...DEFAULT_CUSTOM, ...data.custom,
-    cosmetics: { ...DEFAULT_CUSTOM.cosmetics, ...(data.custom.cosmetics || {}) } };
-  const p = data.progress || {};
+function applyProfileToState(profile){
+  if (!profile) return;
+  if (profile.custom) state.custom = { ...DEFAULT_CUSTOM, ...profile.custom,
+    cosmetics: { ...DEFAULT_CUSTOM.cosmetics, ...(profile.custom.cosmetics || {}) } };
+  // Display name is locked to the account; never trust what's in the custom blob.
+  if (myDisplayName) state.custom.name = myDisplayName;
+  const p = profile.progress || {};
   state.money   = p.money   || 0;
   state.maxDist = p.maxDist || 0;
   state.wood    = p.wood    || 0;
   state.stone   = p.stone   || 0;
   state.iron    = p.iron    || 0;
   state.cosmeticsOwned = Array.isArray(p.cosmeticsOwned) ? p.cosmeticsOwned : [];
+  Object.keys(state.upgrades).forEach(k => state.upgrades[k] = 0);
   Object.assign(state.upgrades, p.upgrades || {});
-  return true;
 }
-loadProgress();
+let _pendingSave = false;
+let _lastSaveSentAt = 0;
+function saveProgress(){
+  const snap = snapshotProfile();
+  // Local cache so a brief disconnect doesn't visibly wipe the HUD next boot
+  if (myUserId){
+    try { localStorage.setItem('etfm-cache-' + myUserId, JSON.stringify(snap)); } catch(e){}
+  }
+  if (mpSocket && mpSocket.readyState === WebSocket.OPEN && mpAuthed){
+    mpSocket.send(JSON.stringify({
+      type: 'profile_save',
+      custom: snap.custom, progress: snap.progress,
+    }));
+    _lastSaveSentAt = Date.now();
+    _pendingSave = false;
+  } else {
+    _pendingSave = true;
+  }
+}
+function maybeFlushPendingSave(){
+  if (_pendingSave && mpSocket && mpSocket.readyState === WebSocket.OPEN && mpAuthed){
+    saveProgress();
+  }
+}
 
-// One-time migration: pit redesign removed the diveTime upgrade.
-// Refund the cost of any already-purchased levels.
-(function migrateDiveTime(){
+// One-time migration: pit redesign removed the diveTime upgrade. Runs after
+// the server delivers our profile in the init message.
+function migrateDiveTime(){
   const def = UPGRADE_DEF.find(d => d.key === 'diveTime');
   const lv = state.upgrades.diveTime || 0;
   if (def && lv > 0){
@@ -2875,6 +3012,16 @@ loadProgress();
     saveProgress();
     setTimeout(() => toast(`潛水時間已移除，退還 $${refund}`), 1200);
   }
+}
+
+// Boot-time: if we already have a cached snapshot for this user, paint the UI
+// from it immediately so there's no jarring blank state while the WS auths.
+(function paintFromCache(){
+  if (!myUserId) return;
+  try {
+    const cached = JSON.parse(localStorage.getItem('etfm-cache-' + myUserId) || 'null');
+    if (cached) applyProfileToState(cached);
+  } catch(e){}
 })();
 
 applyStats();
@@ -3140,12 +3287,12 @@ function renderLeaderboard(){
     el.innerHTML = '<div class="empty">尚無紀錄</div>';
     return;
   }
-  const myName = state.custom?.name || '';
   el.innerHTML = scoreboardData.slice(0, 5).map((s, i) => {
-    const cls = s.name === myName ? 'me' : '';
+    const cls = (myUserId && s.userId === myUserId) ? 'me' : '';
+    const name = s.displayName || s.name || '???';
     return `<div class="row ${cls}">` +
       `<span class="rank">#${i + 1}</span>` +
-      `<span class="name">${escapeHtml(s.name || '???')}</span>` +
+      `<span class="name">${escapeHtml(name)}</span>` +
       `<span class="dist">${Math.round(s.maxDist || 0)}m</span>` +
     `</div>`;
   }).join('');
@@ -3319,11 +3466,17 @@ function removeOtherPlayer(id){
 
 function mpSendIdentify(){
   if (!mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
+  if (!mpAuthed) return;   // server only accepts identify after auth
   mpSocket.send(JSON.stringify({
     type: 'identify',
-    name: state.custom.name,
+    // Name is server-controlled now, but we still include custom so cosmetics propagate
     custom: state.custom,
   }));
+}
+function mpSendAuth(){
+  if (!mpSocket || mpSocket.readyState !== WebSocket.OPEN) return;
+  if (!authToken) return;
+  mpSocket.send(JSON.stringify({ type: 'auth', token: authToken }));
 }
 
 function mpSendState(){
@@ -3358,8 +3511,49 @@ function mpHandleMessage(raw){
   let msg;
   try { msg = JSON.parse(raw); } catch (e) { return; }
 
+  if (msg.type === 'auth_required'){
+    mpSendAuth();
+    return;
+  }
+  if (msg.type === 'auth_failed' || msg.type === 'auth_timeout'){
+    toast('登入逾期，請重新登入');
+    clearSession();
+    try { mpSocket && mpSocket.close(); } catch(e){}
+    mpSocket = null;
+    showAuthScreen();
+    return;
+  }
+
   if (msg.type === 'init'){
     mpMyId = msg.yourId;
+    mpAuthed = true;
+    // Server confirms our identity. Apply server-side profile now (overrides
+    // anything we painted from cache).
+    if (msg.userId) myUserId = msg.userId;
+    if (msg.displayName){
+      myDisplayName = msg.displayName;
+      localStorage.setItem('etfm-display', msg.displayName);
+      state.activeProfile = msg.displayName;
+    }
+    if (msg.profile){
+      applyProfileToState(msg.profile);
+      migrateDiveTime();
+      applyStats();
+      updateHUD();
+      // Rebuild local player with the loaded customization
+      if (typeof buildPlayer === 'function') {
+        try { buildPlayer(state.custom); } catch(e){}
+      }
+      maybeFlushPendingSave();
+    } else {
+      // First time on this account. Offer legacy import only if the player
+      // hasn't already moved into the game yet (otherwise the modal pops over
+      // the playfield).
+      if (state.gamePhase === 'title' || state.gamePhase === 'creator' || state.gamePhase === 'auth'){
+        maybeOfferLegacyImport();
+      }
+      maybeFlushPendingSave();
+    }
     msg.players.forEach(p => { if (p.id !== mpMyId) spawnOtherPlayer(p); });
     // Detect Phase-1B server: it sends coins/waves arrays. Older 1A servers don't.
     if (MP_ENABLED && Array.isArray(msg.coins) && Array.isArray(msg.waves)){
@@ -3403,6 +3597,9 @@ function mpHandleMessage(raw){
       toast('Server 為舊版，金幣/海嘯改本地生成');
     }
     toast(`連線成功（線上 ${msg.players.length} 人）`);
+    // Broadcast our current customization so other players see the right avatar
+    // — important when the player just finished the creator before auth landed.
+    mpSendIdentify();
     // Diagnostic: helps spot whether server is running the latest code
     setTimeout(() => {
       const c = (msg.coins || []).length;
@@ -3508,7 +3705,7 @@ function mpHandleMessage(raw){
       p.ownerName = msg.ownerName;
       p.build = { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
       refreshPlotVisual(p);
-      if (msg.ownerId === mpMyId) toast(`購買「${p.id}」完成！按 H 蓋房子`);
+      if (msg.ownerId === myUserId) toast(`購買「${p.id}」完成！按 H 蓋房子`);
       else toast(`${msg.ownerName} 買下「${p.id}」`);
     }
   } else if (msg.type === 'plot_built'){
@@ -3567,26 +3764,35 @@ function mpHandleMessage(raw){
 
 function mpConnect(){
   if (!PARTYKIT_HOST) return;          // solo mode
+  if (!authToken) return;              // can't connect without a session token
   if (mpSocket) return;
   const isLocal = PARTYKIT_HOST.startsWith('localhost');
   const proto = isLocal ? 'ws' : 'wss';
   const url = `${proto}://${PARTYKIT_HOST}/parties/main/${MP_ROOM}`;
+  let sock;
   try {
-    mpSocket = new WebSocket(url);
+    sock = new WebSocket(url);
   } catch (e){
     console.warn('PartyKit connect failed', e);
     return;
   }
-  mpSocket.addEventListener('open',  () => mpSendIdentify());
-  mpSocket.addEventListener('message', e => mpHandleMessage(e.data));
-  mpSocket.addEventListener('close', () => {
-    mpSocket = null;
-    // Clean up other players' meshes
-    for (const id of Array.from(otherPlayers.keys())) removeOtherPlayer(id);
-    toast('連線中斷，5 秒後重試');
-    setTimeout(mpConnect, 5000);
+  mpSocket = sock;
+  sock.addEventListener('open',  () => { /* wait for auth_required */ });
+  sock.addEventListener('message', e => mpHandleMessage(e.data));
+  sock.addEventListener('close', () => {
+    // Only clear the global if it still points at THIS socket — guards against
+    // an old socket's late close event nulling out a freshly-opened one.
+    if (mpSocket === sock){
+      mpSocket = null;
+      mpAuthed = false;
+      for (const id of Array.from(otherPlayers.keys())) removeOtherPlayer(id);
+      if (authToken){
+        toast('連線中斷，5 秒後重試');
+        setTimeout(mpConnect, 5000);
+      }
+    }
   });
-  mpSocket.addEventListener('error', () => { /* close handler will retry */ });
+  sock.addEventListener('error', () => { /* close handler will retry */ });
 }
 
 function tickMultiplayer(dt){
@@ -3646,15 +3852,6 @@ function setMenuMode(on){
 function show(id){ document.getElementById(id).classList.remove('hidden'); }
 function hide(id){ document.getElementById(id).classList.add('hidden'); }
 
-// Load saved customization (legacy — only used if loadProgress hasn't already
-// pulled the active profile, e.g. brand-new player)
-if (!state.activeProfile){
-  try {
-    const saved = JSON.parse(localStorage.getItem('etfm-custom') || 'null');
-    if (saved) state.custom = { ...DEFAULT_CUSTOM, ...saved };
-  } catch(e) {}
-}
-
 setMenuMode(true);
 
 // --- Build palette swatches ---
@@ -3672,8 +3869,9 @@ for (const field of Object.keys(PALETTES)){
 
 function applyCustomToUI(){
   const nameField = document.getElementById('name-input');
-  nameField.value = state.custom.name || '';
-  nameField.readOnly = (state._creatorMode === 'redesign');
+  // Display name is locked to the account; the field shows it but disables edits.
+  nameField.value = myDisplayName || state.custom.name || '';
+  nameField.readOnly = true;
   document.querySelectorAll('.swatches').forEach(group => {
     const field = group.dataset.field;
     const val = String(state.custom[field]);
@@ -3714,111 +3912,179 @@ function enterGameFromMenu(){
   mpConnect();
 }
 
-// --- Title -> game (if active profile exists) / picker / first-time creator ---
+// --- Title screen account info ---
+function updateTitleAccountInfo(){
+  const el = document.getElementById('title-account-info');
+  if (!el) return;
+  el.textContent = myDisplayName ? `已登入：${myDisplayName}` : '尚未登入';
+  const btn = document.getElementById('title-continue');
+  if (btn) btn.textContent = authToken ? '開始冒險 →' : '登入 / 註冊 →';
+  const sw = document.getElementById('title-switch');
+  if (sw) sw.textContent = authToken ? '登出 / 切換帳號' : '已有帳號？登入';
+}
+updateTitleAccountInfo();
+
 document.getElementById('title-continue').addEventListener('click', () => {
   getAudioCtx();
   startBgm();
   hide('title-screen');
-  if (state.activeProfile){
-    enterGameFromMenu();
+  if (!authToken){
+    showAuthScreen();
     return;
   }
-  if (listProfiles().length > 0){
-    state.gamePhase = 'profile';
-    show('profile-screen');
-    renderProfileList();
-  } else {
-    state.gamePhase = 'creator';
-    state._creatorMode = 'new';
-    show('creator-screen');
-    applyCustomToUI();
-  }
+  // We have a token. Start the WS handshake; profile arrives via init.
+  if (!mpSocket) mpConnect();
+  enterGameFromMenu();
 });
 
-// Title's '切換 / 新增角色' button — explicit way to reach the picker
+// Title switch: log out OR jump to login if not yet signed in
 document.getElementById('title-switch').addEventListener('click', () => {
   getAudioCtx();
   startBgm();
+  if (mpSocket){
+    try { mpSocket.close(); } catch(e){}
+    mpSocket = null;
+  }
+  clearSession();
+  updateTitleAccountInfo();
   hide('title-screen');
-  state.gamePhase = 'profile';
-  show('profile-screen');
-  renderProfileList();
+  showAuthScreen();
 });
 
-// --- Profile picker ---
-function renderProfileList(){
-  const list = document.getElementById('profile-list');
-  list.innerHTML = '';
-  const profiles = listProfiles();
-  const activeName = getActiveProfileName();
-  if (profiles.length === 0){
-    list.innerHTML = '<p style="color:#aaa; text-align:center; padding:14px">還沒有角色，點下面按鈕建立</p>';
+// --- Auth screen wiring ---
+let _authMode = 'login';
+function showAuthScreen(){
+  state.gamePhase = 'auth';
+  show('auth-screen');
+  setAuthMode('login');
+  setTimeout(() => {
+    const u = document.getElementById('auth-username');
+    if (u) u.focus();
+  }, 0);
+}
+function setAuthMode(mode){
+  _authMode = mode;
+  document.querySelectorAll('#auth-screen .auth-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === mode);
+  });
+  document.getElementById('auth-display-field').style.display =
+    mode === 'register' ? 'block' : 'none';
+  document.getElementById('auth-submit').textContent =
+    mode === 'register' ? '註冊並進入' : '登入';
+  document.getElementById('auth-error').textContent = '';
+  document.getElementById('auth-status').textContent = '';
+}
+document.querySelectorAll('#auth-screen .auth-tab').forEach(t => {
+  t.addEventListener('click', () => setAuthMode(t.dataset.mode));
+});
+async function submitAuth(){
+  const btn = document.getElementById('auth-submit');
+  const err = document.getElementById('auth-error');
+  const st  = document.getElementById('auth-status');
+  err.textContent = '';
+  st.textContent  = '';
+  const username = document.getElementById('auth-username').value.trim().toLowerCase();
+  const password = document.getElementById('auth-password').value;
+  const displayName = document.getElementById('auth-display').value.trim();
+  if (!username || !password){
+    err.textContent = '帳號和密碼都要填';
     return;
   }
-  profiles.forEach(name => {
-    const data = loadProfileData(name) || {};
-    const p = data.progress || {};
-    const div = document.createElement('div');
-    div.className = 'profile-row' + (name === activeName ? ' active' : '');
-    div.innerHTML = `
-      <span class="pname">${escapeHtml(name)}</span>
-      <span class="pstats">$${p.money || 0} · 最遠 ${Math.round(p.maxDist || 0)}m</span>
-      <button data-name="${escapeHtml(name)}" data-act="play">▶ 進入</button>
-      <button data-name="${escapeHtml(name)}" data-act="del" class="danger">×</button>
-    `;
-    list.appendChild(div);
-  });
+  btn.disabled = true;
+  st.textContent = _authMode === 'register' ? '註冊中…' : '登入中…';
+  try {
+    const r = _authMode === 'register'
+      ? await apiRegister(username, displayName || username, password)
+      : await apiLogin(username, password);
+    if (!r.body || !r.body.ok){
+      err.textContent = (r.body && r.body.message) || '失敗，請再試';
+      st.textContent = '';
+      return;
+    }
+    setSession(r.body.token, r.body.username, r.body.displayName);
+    updateTitleAccountInfo();
+    hide('auth-screen');
+    mpConnect();
+    if (_authMode === 'register'){
+      // New account → straight to character creator
+      state.custom = JSON.parse(JSON.stringify(DEFAULT_CUSTOM));
+      state.custom.name = r.body.displayName;
+      state._creatorMode = 'new';
+      show('creator-screen');
+      state.gamePhase = 'creator';
+      applyCustomToUI();
+      toast(`歡迎，${r.body.displayName}！`);
+    } else {
+      show('title-screen');
+      state.gamePhase = 'title';
+      toast(`歡迎回來`);
+    }
+  } catch(e){
+    err.textContent = '連線失敗：' + ((e && e.message) || '未知錯誤');
+  } finally {
+    btn.disabled = false;
+    st.textContent = '';
+  }
 }
-document.getElementById('profile-list').addEventListener('click', e => {
-  const btn = e.target.closest('button[data-name]');
-  if (!btn) return;
-  const name = btn.dataset.name;
-  if (btn.dataset.act === 'play'){
-    setActiveProfileName(name);
-    location.reload();
-  } else if (btn.dataset.act === 'del'){
-    if (!confirm(`確定要刪除「${name}」？此動作無法復原`)) return;
-    deleteProfileData(name);
-    renderProfileList();
+document.getElementById('auth-submit').addEventListener('click', submitAuth);
+document.getElementById('auth-username').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){
+    e.preventDefault();
+    if (_authMode === 'register'){
+      document.getElementById('auth-display').focus();
+    } else {
+      document.getElementById('auth-password').focus();
+    }
   }
 });
-document.getElementById('profile-new').addEventListener('click', () => {
-  hide('profile-screen');
-  // Reset state to defaults so creator UI doesn't pre-fill from existing profile
-  state.custom = JSON.parse(JSON.stringify(DEFAULT_CUSTOM));
-  state.money = 0; state.maxDist = 0;
-  state.wood = 0; state.stone = 0; state.iron = 0;
-  state.cosmeticsOwned = [];
-  Object.keys(state.upgrades).forEach(k => state.upgrades[k] = 0);
-  applyStats();
-  state.activeProfile = '';
-  state._creatorMode = 'new';
-  show('creator-screen');
-  state.gamePhase = 'creator';
-  applyCustomToUI();
+document.getElementById('auth-display').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); document.getElementById('auth-password').focus(); }
 });
-document.getElementById('profile-back').addEventListener('click', () => {
-  hide('profile-screen');
-  show('title-screen');
-  state.gamePhase = 'title';
+document.getElementById('auth-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); submitAuth(); }
+});
+
+// --- One-shot migration: import an old localStorage profile into this account ---
+function maybeOfferLegacyImport(){
+  const profiles = listLegacyProfiles();
+  if (profiles.length === 0) return;
+  const list = document.getElementById('migrate-list');
+  list.innerHTML = '';
+  profiles.forEach(name => {
+    const data = loadLegacyProfileData(name) || {};
+    const p = data.progress || {};
+    const div = document.createElement('div');
+    div.className = 'migrate-row';
+    div.dataset.name = name;
+    div.innerHTML =
+      `<span class="mname">${escapeHtml(name)}</span>` +
+      `<span class="mstats">$${p.money || 0} · 最遠 ${Math.round(p.maxDist || 0)}m</span>`;
+    list.appendChild(div);
+  });
+  show('migrate-screen');
+}
+document.getElementById('migrate-list').addEventListener('click', e => {
+  const row = e.target.closest('.migrate-row');
+  if (!row) return;
+  const data = loadLegacyProfileData(row.dataset.name);
+  hide('migrate-screen');
+  if (!data) return;
+  applyProfileToState(data);
+  // Ensure account display name overrides the migrated one
+  if (myDisplayName) state.custom.name = myDisplayName;
+  saveProgress();
+  applyStats();
+  updateHUD();
+  toast(`已匯入「${row.dataset.name}」`);
+});
+document.getElementById('migrate-skip').addEventListener('click', () => {
+  hide('migrate-screen');
 });
 
 // --- Creator -> Tutorial / Play ---
 document.getElementById('start-game').addEventListener('click', () => {
-  const typed = document.getElementById('name-input').value.trim() || '勇者';
-  if (state._creatorMode === 'new'){
-    // New profile: name from input creates a fresh slot
-    if (listProfiles().includes(typed)){
-      if (!confirm(`「${typed}」已經有存檔，確定要覆蓋？`)) return;
-      deleteProfileData(typed);
-    }
-    state.activeProfile = typed;
-    setActiveProfileName(typed);
-  } else if (state._creatorMode === 'redesign'){
-    // Redesign keeps the active profile name regardless of input
-    if (state.activeProfile) state.custom.name = state.activeProfile;
-  }
-  state.custom.name = state._creatorMode === 'redesign' ? state.activeProfile : typed;
+  // Display name is locked to the account; the field is read-only.
+  state.custom.name = myDisplayName || state.custom.name || '勇者';
   state._creatorMode = null;
   saveProgress();
   buildPlayer(state.custom);
@@ -3834,10 +4100,9 @@ document.getElementById('start-game').addEventListener('click', () => {
     show('tutorial-screen');
     renderTutorialStep();
   }
-  mpConnect();
 });
 
-// --- Reset progress (two-step confirm) ---
+// --- Reset progress (two-step confirm) — wipes server-side profile too ---
 document.getElementById('reset-btn').addEventListener('click', () => show('reset-screen'));
 document.getElementById('reset-cancel').addEventListener('click', () => hide('reset-screen'));
 document.getElementById('reset-step2').addEventListener('click', () => {
@@ -3847,12 +4112,16 @@ document.getElementById('reset-step2').addEventListener('click', () => {
 document.getElementById('reset-final-cancel').addEventListener('click', () => hide('reset-final-screen'));
 document.getElementById('reset-final-confirm').addEventListener('click', () => {
   try {
-    // Delete only the current profile (other profiles remain)
-    const name = state.activeProfile || getActiveProfileName();
-    if (name) deleteProfileData(name);
-    localStorage.removeItem('etfm-active');
+    state.money = 0; state.maxDist = 0;
+    state.wood = 0; state.stone = 0; state.iron = 0;
+    state.cosmeticsOwned = [];
+    Object.keys(state.upgrades).forEach(k => state.upgrades[k] = 0);
+    state.custom = JSON.parse(JSON.stringify(DEFAULT_CUSTOM));
+    if (myDisplayName) state.custom.name = myDisplayName;
     localStorage.removeItem('etfm-tutorial');
-    // Also wipe legacy single-save keys if they're somehow still around
+    if (myUserId) localStorage.removeItem('etfm-cache-' + myUserId);
+    saveProgress();
+    // Also wipe any leftover legacy single-save keys
     localStorage.removeItem('etfm-progress');
     localStorage.removeItem('etfm-custom');
   } catch(e){}
