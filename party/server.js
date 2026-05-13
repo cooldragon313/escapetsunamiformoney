@@ -455,7 +455,7 @@ export default class WorldServer {
           else if (r < 0.85) this.nextSpawnIn = 1.5 + Math.random();
           else               this.nextSpawnIn = 8 + Math.random() * 8;
         }
-        this.nextSpawnIn *= 0.9;   // +10% spawn rate vs previous tuning
+        this.nextSpawnIn *= 0.81;  // +10% over previous +10% (cumulative ×0.81)
 
         // Use the deepest authed player to set difficulty
         let minZ = 8;
