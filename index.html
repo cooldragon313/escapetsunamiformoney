@@ -2016,7 +2016,7 @@ function attemptPunch(){
     if (dot < 0.4) continue;   // must be roughly in front
     if (dist < bestDist){ bestDist = dist; best = id; }
   }
-  state.punchUntil = t + 1.5;          // local cooldown (server also enforces)
+  state.punchUntil = t + 2.0;          // local cooldown (server also enforces)
   state.punchAnimUntil = t + 0.3;
   sfx.punch();
   if (best && mpSocket && mpSocket.readyState === WebSocket.OPEN){
@@ -3812,12 +3812,16 @@ function mpHandleMessage(raw){
     if (msg.targetId === mpMyId){
       state.knockVx = (msg.dirX || 0) * (msg.magnitude || 8);
       state.knockVz = (msg.dirZ || 0) * (msg.magnitude || 8);
-      state.stunUntil = t + 0.5;
+      if (msg.stun) state.stunUntil = t + 0.5;
       sfx.punchHit();
-      toast(`${msg.attackerName || '某人'} 揍了你！`);
+      toast(msg.stun
+        ? `${msg.attackerName || '某人'} 一拳把你打暈了！`
+        : `${msg.attackerName || '某人'} 揍了你一拳`);
     } else if (msg.attackerId === mpMyId){
       sfx.punchHit();
-      toast(`揍中 ${msg.targetName || '對手'}！`);
+      toast(msg.stun
+        ? `揍中 ${msg.targetName || '對手'} 並打暈了！`
+        : `揍中 ${msg.targetName || '對手'}`);
     }
   } else if (msg.type === 'plot_owned'){
     const p = PLOTS.find(x => x.id === msg.plotId);

@@ -806,7 +806,7 @@ export default class WorldServer {
       const target = this.players.get(String(msg.targetId || ''));
       if (!target || target === player) return;
       const now = Date.now();
-      if (now - (this.lastPunch?.get(sender.id) || 0) < 1500) return;   // cooldown
+      if (now - (this.lastPunch?.get(sender.id) || 0) < 2000) return;   // 2s cooldown
       const dx = target.x - player.x;
       const dz = target.z - player.z;
       const distSq = dx*dx + dz*dz;
@@ -820,6 +820,7 @@ export default class WorldServer {
         targetId: target.id, targetName: target.name,
         dirX: dx / dist, dirZ: dz / dist,
         magnitude: 9,
+        stun: Math.random() < 0.5,   // 50% chance to stun
       });
     } else if (msg.type === 'score'){
       this.recordScore(player.userId, player.displayName, +msg.maxDist || 0);
