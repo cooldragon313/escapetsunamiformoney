@@ -605,6 +605,7 @@ export default class WorldServer {
         id: p.id, ownerId: p.ownerId, ownerName: p.ownerName, build: p.build,
       })),
       scoreboard: this.scoreboard.slice(0, 10),
+      chatHistory: (this.chatHistory || []).slice(-30),
       waves: this.waves,
       storm: this.storm,
     }));
@@ -832,12 +833,17 @@ export default class WorldServer {
     } else if (msg.type === 'chat'){
       const text = String(msg.text || '').slice(0, 120);
       if (!text) return;
-      this.broadcast({
+      const chatMsg = {
         type: 'chat',
         id: sender.id,
         name: player.name,
         text,
-      });
+        ts: Date.now(),
+      };
+      if (!this.chatHistory) this.chatHistory = [];
+      this.chatHistory.push(chatMsg);
+      if (this.chatHistory.length > 50) this.chatHistory.splice(0, this.chatHistory.length - 50);
+      this.broadcast(chatMsg);
     }
   }
 

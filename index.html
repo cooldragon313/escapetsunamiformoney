@@ -242,17 +242,21 @@
   #leaderboard .row .dist { color: #ffd700; font-size: 11px; }
   #leaderboard .row.me .name { color: #ffd700; font-weight: bold; }
   #leaderboard .empty { color: #888; font-style: italic; }
-  #chat-log { position: fixed; bottom: 50px; left: 12px;
-              max-width: 360px; pointer-events: none;
+  #chat-log { position: fixed; bottom: 60px; left: 12px;
+              width: 380px; max-height: 320px;
+              overflow-y: auto; pointer-events: auto;
               font-family: monospace; font-size: 13px;
               display: flex; flex-direction: column;
-              z-index: 40; }
-  #chat-log .msg { background: rgba(0,0,0,0.6); padding: 4px 8px;
+              background: rgba(0,0,0,0.35); border: 1px solid rgba(255,215,0,0.3);
+              padding: 4px; z-index: 40; }
+  #chat-log::-webkit-scrollbar { width: 6px; }
+  #chat-log::-webkit-scrollbar-thumb { background: rgba(255,215,0,0.4); }
+  #chat-log .msg { background: rgba(0,0,0,0.55); padding: 4px 8px;
                    margin-top: 3px; color: #fff;
                    border-left: 3px solid #ffd700;
                    word-wrap: break-word; }
-  #chat-log .msg.fade { opacity: 0; transition: opacity 1s; }
   #chat-log .msg .name { color: #ffd700; font-weight: bold; margin-right: 6px; }
+  #chat-log .msg .ts { color: #888; font-size: 10px; margin-right: 6px; }
   #chat-input { position: fixed; bottom: 16px; left: 50%;
                 transform: translateX(-50%); width: 400px; max-width: 90vw;
                 padding: 10px 14px;
@@ -3465,7 +3469,7 @@ function sendChat(text){
   if (mpSocket && mpSocket.readyState === WebSocket.OPEN){
     mpSocket.send(JSON.stringify({ type: 'chat', text }));
   } else {
-    receiveChat({ id: 'local', name: state.custom?.name || '我', text });
+    receiveChat({ id: 'local', name: state.custom?.name || '我', text, ts: Date.now() });
   }
 }
 chatInputEl.addEventListener('keydown', e => {
@@ -3536,20 +3540,39 @@ function tickChatBubbles(){
   sweep(player);
   for (const o of otherPlayers.values()) sweep(o.group);
 }
-function receiveChat(msg){
+function fmtChatTime(ts){
+  if (!ts) return '';
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+function appendChatMessage(msg, opts){
   const div = document.createElement('div');
   div.className = 'msg';
-  div.innerHTML = `<span class="name">${escapeHtml(msg.name || '???')}</span>${escapeHtml(msg.text)}`;
+  const tsStr = fmtChatTime(msg.ts);
+  div.innerHTML =
+    (tsStr ? `<span class="ts">${tsStr}</span>` : '') +
+    `<span class="name">${escapeHtml(msg.name || '???')}</span>${escapeHtml(msg.text)}`;
   chatLogEl.appendChild(div);
-  while (chatLogEl.children.length > 6) chatLogEl.removeChild(chatLogEl.firstChild);
-  setTimeout(() => div.classList.add('fade'), 8000);
-  setTimeout(() => div.remove(), 9500);
+  // Cap at 50 messages on screen
+  while (chatLogEl.children.length > 50) chatLogEl.removeChild(chatLogEl.firstChild);
+  // Auto-scroll to latest
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+}
+function receiveChat(msg){
+  appendChatMessage(msg);
   if (msg.id === mpMyId || msg.id === 'local'){
     showPlayerBubble(player, msg.text);
   } else {
     const o = otherPlayers.get(msg.id);
     if (o) showPlayerBubble(o.group, msg.text);
   }
+}
+function loadChatHistory(history){
+  if (!Array.isArray(history)) return;
+  chatLogEl.innerHTML = '';
+  for (const m of history) appendChatMessage(m);
 }
 
 function rebuildOtherAvatar(o, p){
@@ -3689,6 +3712,8 @@ function mpHandleMessage(raw){
         scoreboardData = msg.scoreboard;
         renderLeaderboard();
       }
+      // Replay recent chat so new joiners see ongoing conversation
+      if (Array.isArray(msg.chatHistory)) loadChatHistory(msg.chatHistory);
       // Sync plots
       if (Array.isArray(msg.plots)){
         msg.plots.forEach(srvP => {
