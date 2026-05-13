@@ -810,16 +810,19 @@ export default class WorldServer {
       const dx = target.x - player.x;
       const dz = target.z - player.z;
       const distSq = dx*dx + dz*dz;
-      if (distSq > 25) return;  // out of range (5 units)
+      if (distSq > 36) return;   // out of range (6 units, bat reach)
       if (!this.lastPunch) this.lastPunch = new Map();
       this.lastPunch.set(sender.id, now);
       const dist = Math.sqrt(distSq) || 1;
+      // Strength scales knockback: base 10 + 3.5 per level (Lv 5 ≈ 27.5, Lv 10 ≈ 45)
+      const strengthLv = Math.max(0, Math.min(20, +msg.strength || 0));
+      const magnitude = 10 + strengthLv * 3.5;
       this.broadcast({
         type: 'punch_hit',
         attackerId: sender.id, attackerName: player.name,
         targetId: target.id, targetName: target.name,
         dirX: dx / dist, dirZ: dz / dist,
-        magnitude: 9,
+        magnitude,
         stun: Math.random() < 0.5,   // 50% chance to stun
       });
     } else if (msg.type === 'score'){
