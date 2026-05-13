@@ -2487,11 +2487,11 @@ function update(now){
   if (state.gamePhase === 'playing') {
 
   // ----- Knockback decay (applies even while stunned, time-based so dt-independent) -----
-  if (state.alive && (Math.abs(state.knockVx) > 0.05 || Math.abs(state.knockVz) > 0.05)){
+  if (state.alive && (Math.abs(state.knockVx) > 0.5 || Math.abs(state.knockVz) > 0.5)){
     player.position.x += state.knockVx * dt;
     player.position.z += state.knockVz * dt;
-    // 90% of velocity lost per second → distance ≈ magnitude / 2.3 units
-    const decay = Math.pow(0.1, dt);
+    // Velocity decays to ~15% per second → distance ≈ magnitude / 1.9 units
+    const decay = Math.pow(0.15, dt);
     state.knockVx *= decay;
     state.knockVz *= decay;
   }
