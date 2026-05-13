@@ -27,12 +27,14 @@ const PBKDF2_ITERATIONS = 100_000;   // Cloudflare Workers caps PBKDF2 at 100k
 // Heights kept in sync with the client; server only uses speedMul / width
 // for spawn calculations.
 const WAVE_TYPES = [
-  { id:'green',  height:8,  width:14, speedMul:1.0,  weight:18, storm:false },
-  { id:'blue',   height:15, width:18, speedMul:1.0,  weight:30, storm:false },
-  { id:'red',    height:15, width:14, speedMul:1.8,  weight:18, storm:false },
-  { id:'wide',   height:15, width:32, speedMul:0.85, weight:14, storm:false },
-  { id:'purple', height:25, width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:8, storm:true },
-  { id:'titan',  height:50, width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:3, storm:true },
+  // Heights tuned so 95%+ of waves are jumpable at Lv 4 jump.
+  // Only titan (h=50, needs Lv 15) is "truly uncrossable" and is rare.
+  { id:'green',  height:8,  width:14, speedMul:1.0,  weight:22, storm:false },
+  { id:'blue',   height:10, width:18, speedMul:1.0,  weight:30, storm:false },
+  { id:'red',    height:10, width:14, speedMul:1.8,  weight:18, storm:false },
+  { id:'wide',   height:10, width:32, speedMul:0.85, weight:14, storm:false },
+  { id:'purple', height:20, width:RUNWAY_HALF_W*2 + 12, speedMul:0.7, weight:4, storm:true },
+  { id:'titan',  height:50, width:RUNWAY_HALF_W*2 + 12, speedMul:0.5, weight:1, storm:true },
 ];
 function pickWaveType(stormBoost){
   let total = 0;
