@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 新
+- **角色動畫更生動**
+  - 跑步腳手擺動速度跟著實際移動速度（衝刺、加速 buff、瘦/壯身材都會反映在擺動頻率）
+  - 新增**長髮**髮型選項（造型店、創角畫面）
+  - **長髮 / 尖刺髮型跑步時會往後飄**：3 條髮絲 / 3 根尖刺各自掛在頭頂、靜止時下垂、移動時整體仰角向後，配合輕微擺動
+  - 多人玩家會看到對方的擺動 + 飄髮（透過 `moving` flag 同步）
+
 ### 修
 - **選完角色又跳回選角色（死循環）**：title-continue 不管有沒有 active profile 都直接顯示「選擇角色」清單，所以登入後重整看 reload 又跳到選擇。改成：有 active profile 就直接進遊戲；想切換用標題畫面新加的「切換 / 新增角色」小按鈕。
 - **遊戲完全進不去**（空白畫面 / 點開始無反應）：上一版 `renderLeaderboard()` 在啟動時被呼叫，但裡面讀的 `scoreboardData` 用 `let` 宣告還在 temporal dead zone → 整個 script 從那行起就掛了。拿掉啟動時的 render 呼叫（之後 init / scoreboard_update 訊息來時自然會 render）。

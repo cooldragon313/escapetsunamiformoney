@@ -436,6 +436,7 @@
         <span class="swatch style" data-val="short">短髮</span>
         <span class="swatch style" data-val="cap">帽子</span>
         <span class="swatch style" data-val="spiky">尖刺</span>
+        <span class="swatch style" data-val="long">長髮</span>
       </div>
     </div>
     <div class="creator-row">
@@ -1555,6 +1556,7 @@ function buildAvatar(custom){
   } else {
     const m = mk(0.34, 0.07, 0.05, 0x222222); m.position.set(0, 2.42, -0.46); g.add(m);
   }
+  const hairParts = [];   // each: { group, type } — animated by main loop
   if (custom.hair === 'short'){
     const h = mk(0.95, 0.4, 0.95, custom.hairColor); h.position.y = 2.95; g.add(h);
   } else if (custom.hair === 'cap'){
@@ -1563,8 +1565,26 @@ function buildAvatar(custom){
   } else if (custom.hair === 'spiky'){
     const base = mk(0.92, 0.2, 0.92, custom.hairColor); base.position.y = 2.85; g.add(base);
     for (let i = -1; i <= 1; i++){
+      // wrap spike in a Group so we can pivot at its base (top of head)
+      const spikeGroup = new THREE.Group();
+      spikeGroup.position.set(i * 0.32, 2.95, 0);
       const sp = mk(0.22, 0.5, 0.22, custom.hairColor);
-      sp.position.set(i * 0.32, 3.2, 0); g.add(sp);
+      sp.position.y = 0.25;
+      spikeGroup.add(sp);
+      g.add(spikeGroup);
+      hairParts.push({ group: spikeGroup, type: 'spike' });
+    }
+  } else if (custom.hair === 'long'){
+    const top = mk(1.0, 0.35, 1.0, custom.hairColor); top.position.y = 2.95; g.add(top);
+    // three strands hanging from back of head — pivot at the top
+    for (let i = -1; i <= 1; i++){
+      const strandGroup = new THREE.Group();
+      strandGroup.position.set(i * 0.3, 3.05, 0.42);
+      const strand = mk(0.26, 1.4, 0.12, custom.hairColor);
+      strand.position.y = -0.7;
+      strandGroup.add(strand);
+      g.add(strandGroup);
+      hairParts.push({ group: strandGroup, type: 'strand' });
     }
   }
   const lL = mk(0.45, 1, 0.55, custom.pants); lL.position.set(-0.32, 0.5, 0); g.add(lL);
@@ -1575,7 +1595,7 @@ function buildAvatar(custom){
   const shoeR = mk(0.5, 0.18, 0.7, custom.shoes); shoeR.position.set( 0.32, 0.09, 0.05); g.add(shoeR);
   const pack  = mk(0.7, 0.8, 0.4, 0x5a3a1a); pack.position.set(0, 1.6, 0.45); g.add(pack);
   attachCosmetics(g, custom.cosmetics);
-  return { group: g, legL: lL, legR: lR, armL: aL, armR: aR };
+  return { group: g, legL: lL, legR: lR, armL: aL, armR: aR, hairParts };
 }
 
 function buildPlayer(custom){
@@ -1583,7 +1603,7 @@ function buildPlayer(custom){
   const built = buildAvatar(custom || DEFAULT_CUSTOM);
   player = built.group;
   legL = built.legL; legR = built.legR; armL = built.armL; armR = built.armR;
-  // Apply body-size scaling uniformly so big body is visibly bigger
+  player.userData.hairParts = built.hairParts || [];
   const s = BODY_SCALES[(custom && custom.body) || 'normal'] || 1.0;
   player.scale.set(s, s, s);
   player.position.set(0, groundY(PLAYER_SPAWN_Z), PLAYER_SPAWN_Z);
@@ -1896,6 +1916,8 @@ const state = {
   buffSpeedUntil: 0,            // local-time seconds; speed boost active while t < this
   buffJumpUntil: 0,
   buffMagnetUntil: 0,
+  _swingPhase: 0,               // accumulated leg/arm swing phase
+  _moveMul: 1,                  // current movement multiplier (sprint × buff × body)
   nextSpawnIn: 4,             // randomized wait until next wave
   coinRefreshAccum: 0,
   lastY: 0,                    // for pit-enter / climb-out SFX trigger
@@ -2432,6 +2454,7 @@ function update(now){
     const sprint = (keys['ShiftLeft'] || keys['ShiftRight']) ? 1.5 : 1.0;
     const buff = (t < state.buffSpeedUntil) ? 1.5 : 1.0;
     const bodyMul = BODY_SPEED_MUL[(state.custom && state.custom.body) || 'normal'] || 1.0;
+    state._moveMul = sprint * buff * bodyMul;
     if ((mx !== 0 || mz !== 0)){
       if (!analog){
         const len = Math.hypot(mx, mz);
@@ -2794,7 +2817,9 @@ function update(now){
   );
   state._moving = moving;
   if (moving){
-    const swing = Math.sin(t * 14);
+    // Phase accumulates so the swing rate actually scales with current speed
+    state._swingPhase += dt * 14 * (state._moveMul || 1);
+    const swing = Math.sin(state._swingPhase);
     legL.rotation.x =  swing * 0.6;
     legR.rotation.x = -swing * 0.6;
     armL.rotation.x = -swing * 0.4;
@@ -2804,6 +2829,16 @@ function update(now){
     legR.rotation.x *= 0.85;
     armL.rotation.x *= 0.85;
     armR.rotation.x *= 0.85;
+  }
+  // Hair flow on the local player
+  const hairParts = (player && player.userData && player.userData.hairParts) || [];
+  for (const part of hairParts){
+    const isStrand = part.type === 'strand';
+    const peakTilt = isStrand ? 0.7 : 0.5;
+    const wobbleAmp = isStrand ? 0.15 : 0.1;
+    const wobble = Math.sin(state._swingPhase * (isStrand ? 0.4 : 0.5)) * wobbleAmp;
+    const target = moving ? peakTilt * Math.min(1.5, state._moveMul || 1) + wobble : 0;
+    part.group.rotation.x += (target - part.group.rotation.x) * 0.18;
   }
 
   // ----- Deposit beacon (slow rotate + gentle pulse) -----
@@ -3453,6 +3488,7 @@ function rebuildOtherAvatar(o, p){
   o.group = built.group;
   o.legL = built.legL; o.legR = built.legR;
   o.armL = built.armL; o.armR = built.armR;
+  o.hairParts = built.hairParts || [];
   o.label = label;
   o.name = p.name;
   o.custom = p.custom;
@@ -3819,6 +3855,16 @@ function tickMultiplayer(dt){
       o.legR.rotation.x *= 0.85;
       o.armL.rotation.x *= 0.85;
       o.armR.rotation.x *= 0.85;
+    }
+    // Animate hair on the other player
+    if (o.hairParts){
+      for (const part of o.hairParts){
+        const isStrand = part.type === 'strand';
+        const peak = isStrand ? 0.7 : 0.5;
+        const wobble = Math.sin(t * (isStrand ? 5 : 6)) * (isStrand ? 0.15 : 0.1);
+        const target = (o.moving && !o.inPit) ? peak + wobble : 0;
+        part.group.rotation.x += (target - part.group.rotation.x) * 0.18;
+      }
     }
   }
   // Throttled state send (10 Hz)
