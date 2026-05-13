@@ -319,6 +319,9 @@
   #btn-shop   { top: 64px; right: 28px; width: 64px; height: 64px; font-size: 14px;
                 background: rgba(160,140,40,0.55); border-color: rgba(255,220,140,0.7); }
   #btn-shop:active, #btn-shop.pressed { background: rgba(220,200,60,0.85); }
+  #btn-punch  { bottom: 230px; right: 50px; width: 70px; height: 70px; font-size: 16px;
+                background: rgba(200,60,60,0.55); border-color: rgba(255,160,160,0.7); }
+  #btn-punch:active, #btn-punch.pressed { background: rgba(240,80,80,0.85); }
   #toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
            background: rgba(0,0,0,0.7); color:#fff; padding: 6px 16px;
            border:1px solid #555; opacity:0; transition: opacity 0.3s; font-size: 13px; pointer-events:none; }
@@ -606,6 +609,7 @@
   <div id="stick"><div id="stick-knob"></div></div>
   <div id="btn-sprint" class="touch-btn">衝刺</div>
   <div id="btn-jump" class="touch-btn">跳</div>
+  <div id="btn-punch" class="touch-btn">揍</div>
   <div id="btn-shop" class="touch-btn">商店</div>
 </div>
 
@@ -1690,6 +1694,7 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyB') toggleShop();
   if (e.code === 'KeyC') toggleCosShop();
   if (e.code === 'KeyH') toggleBuildShop();
+  if (e.code === 'KeyF') attemptPunch();
   if (e.code === 'KeyP' && state.plotPromptId && state.money >= PLOT_PRICE){
     state.money -= PLOT_PRICE;
     saveProgress();
@@ -1809,6 +1814,8 @@ bindTouchButton('btn-sprint',
   () => { keys['ShiftLeft'] = false; });
 bindTouchButton('btn-shop',
   () => { toggleShop(); });
+bindTouchButton('btn-punch',
+  () => { attemptPunch(); });
 
 // ----- Camera orbit drag (right-click on desktop, touch drag elsewhere) -----
 const stageEl = document.getElementById('stage');
@@ -1918,6 +1925,11 @@ const state = {
   buffMagnetUntil: 0,
   _swingPhase: 0,               // accumulated leg/arm swing phase
   _moveMul: 1,                  // current movement multiplier (sprint × buff × body)
+  // PvP
+  punchUntil: 0,                // cooldown — can punch again when t >= this
+  punchAnimUntil: 0,            // arm swing animation
+  stunUntil: 0,                 // can't move while t < this
+  knockVx: 0, knockVz: 0,       // current knockback velocity (decays per frame)
   nextSpawnIn: 4,             // randomized wait until next wave
   coinRefreshAccum: 0,
   lastY: 0,                    // for pit-enter / climb-out SFX trigger
@@ -1983,6 +1995,35 @@ function rollMaterialDrop(coinValue, x, z){
   const label = mat === 'wood' ? '🪵 木頭' : mat === 'stone' ? '🪨 石頭' : '⚙️ 鐵';
   toast(`+1 ${label}`);
   if (x !== undefined && z !== undefined) spawnMaterialFlair(mat, x, z);
+}
+
+// ===== PvP =====
+function attemptPunch(){
+  if (!state.alive) return;
+  if (shopOpen || cosShopOpen || buildShopOpen) return;
+  if (t < state.punchUntil) return;
+  // Find nearest other player in a 60° cone in front
+  const yaw = player.rotation.y;
+  const fwdX = -Math.sin(yaw);
+  const fwdZ = -Math.cos(yaw);
+  let best = null, bestDist = 5;
+  for (const [id, o] of otherPlayers){
+    const dx = o.group.position.x - player.position.x;
+    const dz = o.group.position.z - player.position.z;
+    const dist = Math.hypot(dx, dz) || 0.001;
+    if (dist > bestDist) continue;
+    const dot = (dx / dist) * fwdX + (dz / dist) * fwdZ;
+    if (dot < 0.4) continue;   // must be roughly in front
+    if (dist < bestDist){ bestDist = dist; best = id; }
+  }
+  state.punchUntil = t + 1.5;          // local cooldown (server also enforces)
+  state.punchAnimUntil = t + 0.3;
+  sfx.punch();
+  if (best && mpSocket && mpSocket.readyState === WebSocket.OPEN){
+    mpSocket.send(JSON.stringify({ type: 'punch_attempt', targetId: best }));
+  } else if (!best){
+    toast('面前沒人可以揍');
+  }
 }
 
 function applyBuff(type){
@@ -2436,8 +2477,17 @@ function update(now){
 
   if (state.gamePhase === 'playing') {
 
-  // ----- Input -----
-  if (state.alive && !shopOpen){
+  // ----- Knockback decay (applies even while stunned) -----
+  if (state.alive && (Math.abs(state.knockVx) > 0.05 || Math.abs(state.knockVz) > 0.05)){
+    player.position.x += state.knockVx * dt;
+    player.position.z += state.knockVz * dt;
+    state.knockVx *= 0.88;
+    state.knockVz *= 0.88;
+  }
+
+  // ----- Movement input (skipped while stunned) -----
+  const stunned = t < state.stunUntil;
+  if (state.alive && !shopOpen && !stunned){
     let mx = 0, mz = 0;
     // Keyboard (digital ±1)
     if (keys['KeyW'] || keys['ArrowUp'])    mz -= 1;
@@ -2494,17 +2544,20 @@ function update(now){
         player.rotation.y = Math.atan2(-worldMx, -worldMz);
       }
     }
-    // clamp
-    player.position.x = Math.max(-RUNWAY_HALF_W + 0.6, Math.min(RUNWAY_HALF_W - 0.6, player.position.x));
-    player.position.z = Math.min(80, Math.max(-RUNWAY_LEN + 5, player.position.z));
-
-    // jump (jump-buff multiplies the impulse)
-    const floor = floorAt(player.position.x, player.position.z);
+    // jump (jump-buff multiplies the impulse) — only on input, gravity itself runs always below
+    const floorForJump = floorAt(player.position.x, player.position.z);
     const jumpBuffMul = (t < state.buffJumpUntil) ? 1.5 : 1.0;
-    if (keys['Space'] && Math.abs(player.position.y - floor) < 0.05){
+    if (keys['Space'] && Math.abs(player.position.y - floorForJump) < 0.05){
       state.vy = state.jump * jumpBuffMul;
       sfx.jump();
     }
+  }
+
+  // ----- Vertical physics + clamp (runs even while stunned so victims fall normally) -----
+  if (state.alive && !shopOpen){
+    player.position.x = Math.max(-RUNWAY_HALF_W + 0.6, Math.min(RUNWAY_HALF_W - 0.6, player.position.x));
+    player.position.z = Math.min(80, Math.max(-RUNWAY_LEN + 5, player.position.z));
+    const floor = floorAt(player.position.x, player.position.z);
     state.vy -= 0.025;
     player.position.y += state.vy * 60 * dt;
     if (player.position.y < floor){
@@ -2829,6 +2882,12 @@ function update(now){
     legR.rotation.x *= 0.85;
     armL.rotation.x *= 0.85;
     armR.rotation.x *= 0.85;
+  }
+  // Punch animation: right arm swings forward sharply for ~0.3s, overrides walk swing
+  if (t < state.punchAnimUntil){
+    const punchPhase = 1 - Math.max(0, state.punchAnimUntil - t) / 0.3;
+    // 0 → forward (-1.6 rad), then springs back toward 0
+    armR.rotation.x = -1.6 * Math.sin(punchPhase * Math.PI);
   }
   // Hair flow on the local player
   const hairParts = (player && player.userData && player.userData.hairParts) || [];
@@ -3183,6 +3242,11 @@ const sfx = {
                       tone({freq:70, freqEnd:50, type:'sawtooth', duration:1.0, volume:0.20, delay:0.05}); },
   stormEnd:   () => noiseBurst({duration:0.8, volume:0.15, lowpass:600}),
   baseEnter:  () => tone({freq:880, type:'triangle', duration:0.10, volume:0.14}),
+  punch:      () => { noiseBurst({duration:0.08, volume:0.22, lowpass:1200});
+                      tone({freq:180, freqEnd:60, type:'square', duration:0.10, volume:0.20}); },
+  punchHit:   () => { noiseBurst({duration:0.14, volume:0.32, lowpass:600});
+                      tone({freq:90, freqEnd:40, type:'sawtooth', duration:0.18, volume:0.26});
+                      tone({freq:160, type:'square', duration:0.06, volume:0.18, delay:0.04}); },
 };
 
 // --- BGM (drop files in assets/bgm/ as 01.mp3, 02.mp3, … — they auto-cycle) ---
@@ -3736,6 +3800,25 @@ function mpHandleMessage(raw){
   } else if (msg.type === 'scoreboard_update'){
     scoreboardData = Array.isArray(msg.scoreboard) ? msg.scoreboard : [];
     renderLeaderboard();
+  } else if (msg.type === 'punch_hit'){
+    // Animate attacker's right arm
+    if (msg.attackerId === mpMyId){
+      state.punchAnimUntil = t + 0.3;
+    } else {
+      const a = otherPlayers.get(msg.attackerId);
+      if (a) a.punchAnimUntil = t + 0.3;
+    }
+    // Apply effect to target
+    if (msg.targetId === mpMyId){
+      state.knockVx = (msg.dirX || 0) * (msg.magnitude || 8);
+      state.knockVz = (msg.dirZ || 0) * (msg.magnitude || 8);
+      state.stunUntil = t + 0.5;
+      sfx.punchHit();
+      toast(`${msg.attackerName || '某人'} 揍了你！`);
+    } else if (msg.attackerId === mpMyId){
+      sfx.punchHit();
+      toast(`揍中 ${msg.targetName || '對手'}！`);
+    }
   } else if (msg.type === 'plot_owned'){
     const p = PLOTS.find(x => x.id === msg.plotId);
     if (p){
@@ -3856,6 +3939,11 @@ function tickMultiplayer(dt){
       o.armL.rotation.x *= 0.85;
       o.armR.rotation.x *= 0.85;
     }
+    // Punch animation override
+    if (o.punchAnimUntil && t < o.punchAnimUntil){
+      const punchPhase = 1 - Math.max(0, o.punchAnimUntil - t) / 0.3;
+      o.armR.rotation.x = -1.6 * Math.sin(punchPhase * Math.PI);
+    }
     // Animate hair on the other player
     if (o.hairParts){
       for (const part of o.hairParts){
@@ -3892,6 +3980,7 @@ const TUTORIAL_STEPS = [
   '跳高不夠的坑「走不過去」— 整個坑當成牆，得繞開或回基地升級跳高。',
   '活著回到山頂（金色光柱）→ 自動把背包換成存款。按 B 開商店升級裝備。',
   '死了寶藏掉在原地變大金箱，所有玩家都能撿。背包滿時撿到剩餘的會灑在地上變散幣。',
+  '可以揍人！按 F（手機點「揍」按鈕）對前方 5 公尺內的玩家出拳，被揍中的會被擊飛 + 短暫暈眩。冷卻 1.5 秒。',
 ];
 
 function setMenuMode(on){

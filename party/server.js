@@ -802,6 +802,25 @@ export default class WorldServer {
         }
       }
       this.chests = this.chests.filter(x => x.id !== c.id);
+    } else if (msg.type === 'punch_attempt'){
+      const target = this.players.get(String(msg.targetId || ''));
+      if (!target || target === player) return;
+      const now = Date.now();
+      if (now - (this.lastPunch?.get(sender.id) || 0) < 1500) return;   // cooldown
+      const dx = target.x - player.x;
+      const dz = target.z - player.z;
+      const distSq = dx*dx + dz*dz;
+      if (distSq > 25) return;  // out of range (5 units)
+      if (!this.lastPunch) this.lastPunch = new Map();
+      this.lastPunch.set(sender.id, now);
+      const dist = Math.sqrt(distSq) || 1;
+      this.broadcast({
+        type: 'punch_hit',
+        attackerId: sender.id, attackerName: player.name,
+        targetId: target.id, targetName: target.name,
+        dirX: dx / dist, dirZ: dz / dist,
+        magnitude: 9,
+      });
     } else if (msg.type === 'score'){
       this.recordScore(player.userId, player.displayName, +msg.maxDist || 0);
     } else if (msg.type === 'chat'){
