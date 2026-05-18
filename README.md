@@ -37,6 +37,7 @@
 | 轉鏡頭 | 滑鼠**左鍵**拖曳 | 空白處拖曳 |
 | 縮放 | 滾輪 | 兩指捏合 |
 | 鏡頭復位 | <kbd>R</kbd> | — |
+| 切換畫質檔 | <kbd>G</kbd>（Off / Basic / Polished / Cinema） | — |
 
 ---
 
@@ -214,6 +215,18 @@ server 權威，先到先贏，45 秒重生（重生會重新洗類型）。
 
 > 沒有忘記密碼流程，請用記得住的密碼。
 
+### 管理後台（admin.html）
+
+開 `admin.html` 直接連到 server，可以：
+
+- 看所有註冊帳號（含註冊時間、存款、最遠距離、升級紀錄）
+- 搜尋 / 排序
+- **刪除帳號**（同時清排行榜紀錄、釋出地塊、踢掉現場連線）
+- **重設密碼**（密碼是 PBKDF2 雜湊，看不到原始；只能給玩家新的）
+- 看伺服器即時狀態（線上人數、暴風雨、寶箱）
+
+登入用的是 server 的 `ADMIN_PASSWORD` env var；沒設這個變數的話 admin 路由全部回 503。**密碼存 sessionStorage**（關 tab 就要重打），host 設定存 localStorage 方便下次。
+
 ---
 
 ## 音效 / BGM
@@ -240,6 +253,9 @@ npx partykit login                              # 第一次：GitHub OAuth
 npx partykit env add AUTH_SECRET                # 互動輸入隨機字串
 # 或一次塞：
 # echo "$(openssl rand -hex 32)" | npx partykit env add AUTH_SECRET
+
+# 管理員密碼（用來登入 admin.html 後台；沒設就完全停用 admin 路由）
+npx partykit env add ADMIN_PASSWORD             # 互動輸入
 
 npm run deploy                                  # 印出網址
 ```

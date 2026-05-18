@@ -438,6 +438,13 @@
       <input id="name-input" type="text" maxlength="12" placeholder="勇者">
     </div>
     <div class="creator-row">
+      <label>性別</label>
+      <div class="swatches" data-field="gender">
+        <span class="swatch style" data-val="male">男</span>
+        <span class="swatch style" data-val="female">女</span>
+      </div>
+    </div>
+    <div class="creator-row">
       <label>髮型</label>
       <div class="swatches" data-field="hair">
         <span class="swatch style" data-val="short">短髮</span>
@@ -631,6 +638,15 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Postprocessing addons (loaded for T3 graphics preset; ignored if unused) -->
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/OutlinePass.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/shaders/FXAAShader.js"></script>
 <script>
 // ============================================================
 // CONFIG
@@ -744,21 +760,212 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHei
 camera.position.set(0, 6, BASE_Z + 2);
 camera.lookAt(0, 1, 0);
 
-const renderer = new THREE.WebGLRenderer({ antialias: false });
+// Renderer — AA + correct pixel ratio (capped to 2 to spare mobile)
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(1);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+// Shadow map ready to flip on later via the graphics preset
+renderer.shadowMap.enabled = false;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.getElementById('stage').appendChild(renderer.domElement);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (composer) composer.setSize(window.innerWidth, window.innerHeight);
 });
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+// --- Lighting rig ---
+// Three lights live in the scene at all times; their intensities are tweaked
+// per graphics preset so we don't add/remove scene nodes on the hot path.
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+scene.add(ambientLight);
+const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x445566, 0);
+scene.add(hemiLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
-dirLight.position.set(20, 30, 10);
+dirLight.position.set(60, 100, 40);
 scene.add(dirLight);
+scene.add(dirLight.target);   // target moves with the player when shadows are on
+
+// --- Composer (built lazily when Cinema preset is enabled) ---
+let composer = null;
+let bloomPass = null;
+let outlinePass = null;
+let fxaaPass = null;
+function ensureComposer(){
+  if (composer || typeof THREE.EffectComposer === 'undefined') return composer;
+  composer = new THREE.EffectComposer(renderer);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  composer.addPass(new THREE.RenderPass(scene, camera));
+  outlinePass = new THREE.OutlinePass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
+  outlinePass.edgeStrength = 2.0;
+  outlinePass.edgeGlow = 0.0;
+  outlinePass.edgeThickness = 1.0;
+  outlinePass.visibleEdgeColor.set(0x000000);
+  outlinePass.hiddenEdgeColor.set(0x000000);
+  composer.addPass(outlinePass);
+  bloomPass = new THREE.UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.7,    // strength
+    0.5,    // radius
+    0.82    // threshold (only emissive surfaces above this brightness bloom)
+  );
+  composer.addPass(bloomPass);
+  fxaaPass = new THREE.ShaderPass(THREE.FXAAShader);
+  const pr = renderer.getPixelRatio();
+  fxaaPass.material.uniforms['resolution'].value.set(
+    1 / (window.innerWidth * pr), 1 / (window.innerHeight * pr));
+  composer.addPass(fxaaPass);
+  return composer;
+}
+
+// ============================================================
+// SKY DOME — gradient sphere, shader is cheap and always present.
+// Visible only when graphics preset >= 2; lower presets fall back to the
+// flat scene.background colour set elsewhere.
+// ============================================================
+const skyUniforms = {
+  topColor:    { value: new THREE.Color(0x4a9be0) },
+  midColor:    { value: new THREE.Color(0xa0d8f0) },
+  bottomColor: { value: new THREE.Color(0xfff0d0) },
+  offset:      { value: 80 },
+  exponent:    { value: 0.7 },
+};
+const skyGeom = new THREE.SphereGeometry(2500, 32, 16);
+const skyMat = new THREE.ShaderMaterial({
+  uniforms: skyUniforms,
+  vertexShader: `
+    varying vec3 vWorldPos;
+    void main(){
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 topColor;
+    uniform vec3 midColor;
+    uniform vec3 bottomColor;
+    uniform float offset;
+    uniform float exponent;
+    varying vec3 vWorldPos;
+    void main(){
+      float h = normalize(vWorldPos + vec3(0.0, offset, 0.0)).y;
+      vec3 col;
+      if (h > 0.0){
+        col = mix(midColor, topColor, pow(max(h, 0.0), exponent));
+      } else {
+        col = mix(midColor, bottomColor, pow(max(-h, 0.0), 0.5));
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+const skyDome = new THREE.Mesh(skyGeom, skyMat);
+skyDome.visible = false;
+scene.add(skyDome);
+
+// ============================================================
+// GRAPHICS PRESETS — runtime switchable via the G key
+//   0 = Off       — flat lighting, no shadows, no postfx (closest to launch look)
+//   1 = Basic     — ACES tone map + warm sun + hemisphere ambient
+//   2 = Polished  — adds soft shadows + gradient sky
+//   3 = Cinema    — adds bloom + cel outline + (live water shader on waves)
+// ============================================================
+const GFX_PRESETS = ['Off', 'Basic', 'Polished', 'Cinema'];
+
+function setupShadowCamera(){
+  // Directional shadow camera tight to a box around the player & nearby waves
+  // so map units don't blow out shadow resolution.
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(2048, 2048);
+  const c = dirLight.shadow.camera;
+  c.left = -80; c.right = 80;
+  c.top = 80;   c.bottom = -80;
+  c.near = 10;  c.far = 300;
+  dirLight.shadow.bias = -0.0008;
+  dirLight.shadow.normalBias = 0.04;
+  c.updateProjectionMatrix();
+}
+
+function applyGraphicsPreset(n){
+  state.gfx = Math.max(0, Math.min(3, n | 0));
+  localStorage.setItem('etfm-gfx', String(state.gfx));
+
+  // --- Renderer-level toggles ---
+  if (state.gfx === 0){
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.outputEncoding = THREE.LinearEncoding;
+  } else {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+  }
+
+  // --- Lighting ---
+  if (state.gfx === 0){
+    ambientLight.intensity = 0.7;
+    hemiLight.intensity = 0;
+    dirLight.color.setHex(0xffffff);
+    dirLight.intensity = 0.7;
+    dirLight.position.set(20, 30, 10);
+  } else {
+    // Drop flat ambient; let hemisphere give sky/ground colour bounce + warm sun
+    ambientLight.intensity = 0.15;
+    hemiLight.intensity = 0.55;
+    dirLight.color.setHex(0xfff4d0);
+    dirLight.intensity = 1.05;
+    dirLight.position.set(60, 110, 40);
+  }
+
+  // --- Shadows ---
+  if (state.gfx >= 2){
+    renderer.shadowMap.enabled = true;
+    setupShadowCamera();
+    refreshShadowAssignments(true);
+  } else {
+    renderer.shadowMap.enabled = false;
+    dirLight.castShadow = false;
+    refreshShadowAssignments(false);
+  }
+
+  // --- Sky dome ---
+  skyDome.visible = state.gfx >= 2;
+  if (state.gfx >= 2){
+    scene.background = null;
+    if (scene.fog) scene.fog.color.setHex(state.storm ? 0x4a3030 : 0xa0d8f0);
+  } else {
+    scene.background = new THREE.Color(state.storm ? 0x4a3030 : 0x87ceeb);
+    if (scene.fog) scene.fog.color.setHex(state.storm ? 0x4a3030 : 0x87ceeb);
+  }
+
+  // --- Post-processing (Cinema only) ---
+  if (state.gfx >= 3){
+    ensureComposer();
+    if (outlinePass) refreshOutlineSelection();
+  }
+
+  // --- Emissive boost on shiny objects ---
+  refreshEmissive();
+
+  // --- Water shader on tsunamis (Cinema only) ---
+  refreshWaveMaterials();
+
+  // --- HUD label ---
+  showGfxLabel();
+}
+
+// Bindings — real implementations are assigned further down once meshes exist
+let refreshShadowAssignments = () => {};
+let refreshOutlineSelection = () => {};
+let refreshEmissive = () => {};
+let refreshWaveMaterials = () => {};
+let showGfxLabel = () => {};
 
 // ============================================================
 // HELPERS
@@ -1351,6 +1558,7 @@ let player, legL, legR, armL, armR;
 
 const DEFAULT_CUSTOM = {
   name: '勇者',
+  gender: 'male',    // 'male' | 'female' — affects torso/shoulders/chest silhouette
   hair: 'short',     hairColor: 0x3a2a1a,
   expression: 'smile',
   body: 'normal',    // 'thin' | 'normal' | 'large'
@@ -1569,7 +1777,20 @@ function attachCosmetics(group, cosmetics){
 function buildAvatar(custom){
   custom = custom || DEFAULT_CUSTOM;
   const g = new THREE.Group();
-  const torso = mk(1.2, 1.3, 0.7, custom.shirt); torso.position.y = 1.55; g.add(torso);
+  const isFem = custom.gender === 'female';
+  // Female silhouette: narrower torso + small chest hint + slimmer arms.
+  // Voxel style, so cues stay blocky and recognizable from a distance.
+  const torsoW = isFem ? 0.95 : 1.2;
+  const torsoH = isFem ? 1.25 : 1.3;
+  const torsoD = isFem ? 0.58 : 0.7;
+  const torso = mk(torsoW, torsoH, torsoD, custom.shirt); torso.position.y = 1.55; g.add(torso);
+  if (isFem){
+    // Two small boxes on the chest, sitting just proud of the torso front
+    const chestY = 1.92;
+    const chestZ = -torsoD / 2 - 0.05;
+    const chestL = mk(0.22, 0.20, 0.12, custom.shirt); chestL.position.set(-0.20, chestY, chestZ); g.add(chestL);
+    const chestR = mk(0.22, 0.20, 0.12, custom.shirt); chestR.position.set( 0.20, chestY, chestZ); g.add(chestR);
+  }
   const head  = mk(0.9, 0.9, 0.9, custom.skin); head.position.y = 2.65; g.add(head);
   const eyeL  = mk(0.14, 0.14, 0.05, 0x000000); eyeL.position.set(-0.2, 2.72, -0.46); g.add(eyeL);
   const eyeR  = mk(0.14, 0.14, 0.05, 0x000000); eyeR.position.set( 0.2, 2.72, -0.46); g.add(eyeR);
@@ -1613,8 +1834,10 @@ function buildAvatar(custom){
   }
   const lL = mk(0.45, 1, 0.55, custom.pants); lL.position.set(-0.32, 0.5, 0); g.add(lL);
   const lR = mk(0.45, 1, 0.55, custom.pants); lR.position.set( 0.32, 0.5, 0); g.add(lR);
-  const aL = mk(0.35, 1.0, 0.4, custom.skin); aL.position.set(-0.78, 1.6, 0); g.add(aL);
-  const aR = mk(0.35, 1.0, 0.4, custom.skin); aR.position.set( 0.78, 1.6, 0); g.add(aR);
+  const armW   = isFem ? 0.28 : 0.35;
+  const armOff = isFem ? 0.66 : 0.78;
+  const aL = mk(armW, 1.0, 0.4, custom.skin); aL.position.set(-armOff, 1.6, 0); g.add(aL);
+  const aR = mk(armW, 1.0, 0.4, custom.skin); aR.position.set( armOff, 1.6, 0); g.add(aR);
   // Wooden bat — child of right arm, hangs from the hand
   const batHandle = mk(0.20, 0.30, 0.20, 0x5a3a1a); batHandle.position.set(0, -0.65, 0); aR.add(batHandle);
   const batHead   = mk(0.30, 0.75, 0.30, 0x8b5a2b); batHead.position.set(0,   -1.18, 0); aR.add(batHead);
@@ -1960,6 +2183,7 @@ const state = {
   stormUntil: 0,
   stormCooldownUntil: 25,      // earliest time (in t-seconds) for first storm
   stormBonusMultiplier: 1,
+  gfx: parseInt(localStorage.getItem('etfm-gfx') || '2', 10),   // 0..3, see GFX_PRESETS
 };
 
 // Material 3D models — distinct shape & colour per type
@@ -2921,11 +3145,15 @@ function update(now){
     const eased = phase * phase * (3 - 2 * phase);   // smoothstep
     armR.rotation.x = 1.4 - eased * 3.4;             // 1.4 → -2.0 rad
   }
-  // Hair flow on the local player
+  // Hair flow on the local player. Spikes pivot at top and point upward, so a
+  // positive rotation.x correctly tips them toward +Z (behind the running
+  // player). Strands hang downward from the same pivot, so the SAME positive
+  // rotation would swing them in front of the face — flip the sign so long
+  // hair streams backward instead of becoming an accidental beard.
   const hairParts = (player && player.userData && player.userData.hairParts) || [];
   for (const part of hairParts){
     const isStrand = part.type === 'strand';
-    const peakTilt = isStrand ? 0.7 : 0.5;
+    const peakTilt = isStrand ? -0.7 : 0.5;
     const wobbleAmp = isStrand ? 0.15 : 0.1;
     const wobble = Math.sin(state._swingPhase * (isStrand ? 0.4 : 0.5)) * wobbleAmp;
     const target = moving ? peakTilt * Math.min(1.5, state._moveMul || 1) + wobble : 0;
@@ -2984,9 +3212,33 @@ function update(now){
   if (state.gamePhase === 'playing') maybeReportScore();
 
   if (state.gamePhase === 'playing') updateHUD();
-  renderer.render(scene, camera);
+  // Picks up shadow + outline assignments on any newly-spawned coins/waves/
+  // players. ~once a second is enough for visual lag, scene.traverse on a few
+  // hundred meshes is cheap.
+  _gfxRefreshAccum += dt;
+  if (_gfxRefreshAccum > 1.0){
+    _gfxRefreshAccum = 0;
+    if (state.gfx >= 2) refreshShadowAssignments(true);
+    if (state.gfx >= 3) refreshOutlineSelection();
+  }
+  // Move the sun rig with the camera so the shadow camera frustum keeps the
+  // player inside it (otherwise shadows drop off after a few hundred metres).
+  if (state.gfx >= 2 && player){
+    dirLight.target.position.copy(player.position);
+    dirLight.target.updateMatrixWorld();
+    dirLight.position.set(
+      player.position.x + 60,
+      player.position.y + 110,
+      player.position.z + 40);
+  }
+  if (state.gfx >= 3 && composer){
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
   requestAnimationFrame(update);
 }
+let _gfxRefreshAccum = 0;
 
 // ============================================================
 // AUTH (server-side accounts)
@@ -4004,11 +4256,11 @@ function tickMultiplayer(dt){
       const eased = phase * phase * (3 - 2 * phase);
       o.armR.rotation.x = 1.4 - eased * 3.4;
     }
-    // Animate hair on the other player
+    // Animate hair on the other player (strands flip negative — see local code)
     if (o.hairParts){
       for (const part of o.hairParts){
         const isStrand = part.type === 'strand';
-        const peak = isStrand ? 0.7 : 0.5;
+        const peak = isStrand ? -0.7 : 0.5;
         const wobble = Math.sin(t * (isStrand ? 5 : 6)) * (isStrand ? 0.15 : 0.1);
         const target = (o.moving && !o.inPit) ? peak + wobble : 0;
         part.group.rotation.x += (target - part.group.rotation.x) * 0.18;
@@ -4345,6 +4597,60 @@ document.getElementById('tutorial-next').addEventListener('click', () => {
     setMenuMode(false);
   }
 });
+
+// ============================================================
+// GRAPHICS PRESET IMPLEMENTATIONS — wired here so all the arrays they touch
+// (scene, player, tsunamis, PLOTS, coinGoldMat, bigTreasureMesh) already exist.
+// ============================================================
+refreshShadowAssignments = function(on){
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    if (o === skyDome) return;
+    o.castShadow = on;
+    o.receiveShadow = on;
+  });
+};
+refreshOutlineSelection = function(){
+  if (!outlinePass) return;
+  const sel = [];
+  if (player) sel.push(player);
+  for (const op of otherPlayers.values()) sel.push(op.group);
+  for (const t of tsunamis) sel.push(t.obj.group);
+  for (const p of PLOTS){ if (p.buildGroup) sel.push(p.buildGroup); }
+  if (bigTreasureMesh) sel.push(bigTreasureMesh);
+  outlinePass.selectedObjects = sel;
+};
+refreshEmissive = function(){
+  // MeshLambertMaterial supports emissive (but not emissiveIntensity).
+  // Mutate the shared coin gold materials so every coin instance lights up.
+  if (state.gfx >= 1){
+    coinGoldMat.emissive.setHex(0x553300);
+    coinEdgeMat.emissive.setHex(0x3a2200);
+  } else {
+    coinGoldMat.emissive.setHex(0x000000);
+    coinEdgeMat.emissive.setHex(0x000000);
+  }
+};
+refreshWaveMaterials = function(){
+  // No-op for now — bloom catches the white foam tops, and ACES tone-maps
+  // the deep-blue walls nicely. A full water shader can ship later.
+};
+showGfxLabel = function(){
+  toast(`畫質：${state.gfx} - ${GFX_PRESETS[state.gfx]}`);
+};
+
+// Cycle through presets with G (only while playing — don't steal key input
+// from menus or the chat box).
+window.addEventListener('keydown', e => {
+  if (e.code !== 'KeyG' || e.repeat) return;
+  if (state.gamePhase !== 'playing') return;
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+  applyGraphicsPreset((state.gfx + 1) % GFX_PRESETS.length);
+});
+
+// Apply the saved preset (or the default `2 = Polished`) now that every
+// system referenced by the refresh functions has been constructed.
+applyGraphicsPreset(state.gfx);
 
 requestAnimationFrame(update);
 </script>

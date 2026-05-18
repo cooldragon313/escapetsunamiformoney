@@ -329,6 +329,125 @@ export default class WorldServer {
       });
     }
 
+    // ============================================================
+    // ADMIN — gated by ADMIN_PASSWORD env var. Missing var disables ALL
+    // admin routes (so a forgotten secret can't be brute-forced).
+    // Auth: Authorization: Bearer <admin password>
+    // ============================================================
+    if (url.pathname.indexOf('/admin/') !== -1 || url.pathname.endsWith('/admin')){
+      const env = (this.room && this.room.env)
+               || (this.room && this.room.context && this.room.context.env)
+               || (typeof process !== 'undefined' && process.env);
+      const adminPw = env && env.ADMIN_PASSWORD;
+      if (!adminPw){
+        return jsonResponse({ error:'admin_disabled', message:'ADMIN_PASSWORD env var not set on the server' }, 503);
+      }
+      const authHeader = req.headers.get('authorization') || '';
+      const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (provided !== adminPw){
+        return jsonResponse({ error:'bad_admin', message:'Wrong admin password' }, 401);
+      }
+
+      // GET /admin/stats — totals
+      if (url.pathname.endsWith('/admin/stats') && req.method === 'GET'){
+        const userMap = await this.room.storage.list({ prefix: 'user:' });
+        return jsonResponse({
+          ok: true,
+          users: userMap.size,
+          scoreboard: this.scoreboard.length,
+          activePlayers: this.players.size,
+          ownedPlots: this.plots.filter(p => p.ownerId).length,
+          totalPlots: this.plots.length,
+          activeChests: this.chests.filter(c => c.available).length,
+          storm: this.storm,
+          serverTime: Date.now(),
+        });
+      }
+
+      // GET /admin/users — list (omit hash/salt; safe to ship to client)
+      if (url.pathname.endsWith('/admin/users') && req.method === 'GET'){
+        const userMap = await this.room.storage.list({ prefix: 'user:' });
+        const list = [];
+        for (const [, u] of userMap){
+          if (!u) continue;
+          const p = (u.profile && u.profile.progress) || {};
+          list.push({
+            username: u.username,
+            displayName: u.displayName,
+            createdAt: u.createdAt,
+            money: p.money || 0,
+            maxDist: p.maxDist || 0,
+            upgrades: p.upgrades || {},
+            hasProfile: !!u.profile,
+          });
+        }
+        list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        return jsonResponse({ ok: true, users: list });
+      }
+
+      // /admin/users/<username>... — operations on one user
+      const userMatch = url.pathname.match(/\/admin\/users\/([^/]+)(?:\/(reset))?$/);
+      if (userMatch){
+        const targetName = normalizeUsername(decodeURIComponent(userMatch[1]));
+        const op = userMatch[2];
+        const user = await this.room.storage.get('user:' + targetName);
+        if (!user) return jsonResponse({ error:'no_user', message:'找不到這個帳號' }, 404);
+
+        // DELETE /admin/users/<username>
+        if (!op && req.method === 'DELETE'){
+          await this.room.storage.delete('user:' + targetName);
+          // Also strip them from the scoreboard
+          const before = this.scoreboard.length;
+          this.scoreboard = this.scoreboard.filter(s => s.userId !== targetName);
+          if (this.scoreboard.length !== before){
+            this.scoreboardDirty = true;
+            this.broadcast({ type: 'scoreboard_update', scoreboard: this.scoreboard });
+          }
+          // Release any plots they owned (back on the market)
+          let releasedPlots = 0;
+          for (const p of this.plots){
+            if (p.ownerId === targetName){
+              p.ownerId = null; p.ownerName = '';
+              p.build = { floor:'', walls:'', roof:'', furniture:'', decoration:'' };
+              releasedPlots++;
+              this.broadcast({
+                type: 'plot_owned',
+                plotId: p.id, ownerId: null, ownerName: '',
+              });
+            }
+          }
+          if (releasedPlots) this.plotsDirty = true;
+          // Boot any live sessions
+          for (const [cid, p] of this.players){
+            if (p.userId === targetName){
+              const conns = this.room.getConnections ? Array.from(this.room.getConnections()) : [];
+              for (const c of conns){
+                if (c.id === cid){ try { c.close(); } catch(e){} }
+              }
+            }
+          }
+          return jsonResponse({ ok: true, deleted: targetName, releasedPlots });
+        }
+
+        // POST /admin/users/<username>/reset — set a new password
+        if (op === 'reset' && req.method === 'POST'){
+          let body;
+          try { body = await req.json(); }
+          catch(e){ return jsonResponse({ error:'bad_json' }, 400); }
+          const newPassword = String(body.password || '');
+          if (!isValidPassword(newPassword)){
+            return jsonResponse({ error:'password_invalid', message:'新密碼至少 6 字' }, 400);
+          }
+          const { hash, salt } = await hashPassword(newPassword);
+          user.hash = hash; user.salt = salt;
+          await this.room.storage.put('user:' + targetName, user);
+          return jsonResponse({ ok: true, message:`密碼已重設給 ${targetName}` });
+        }
+      }
+
+      return jsonResponse({ error:'admin_route_not_found', path: url.pathname, method: req.method }, 404);
+    }
+
     return jsonResponse({ error:'not_found' }, 404);
   }
 

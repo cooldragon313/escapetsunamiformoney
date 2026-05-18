@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ETFM Admin</title>
+<style>
+  :root {
+    --bg: #1a1d24;
+    --panel: #232730;
+    --border: #3a3f4b;
+    --text: #e8eaed;
+    --muted: #8a909c;
+    --accent: #ffd700;
+    --danger: #e64545;
+    --success: #44cc66;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  header h1 { margin: 0; font-size: 16px; letter-spacing: 4px; color: var(--accent); }
+  header .spacer { flex: 1; }
+  header .host {
+    color: var(--muted); font-size: 11px;
+    background: rgba(0,0,0,0.3); padding: 4px 10px; border-radius: 3px;
+  }
+  header button {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 6px 14px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 2px;
+  }
+  header button:hover { color: var(--text); border-color: var(--accent); }
+
+  main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 14px;
+  }
+  .stat-card .label { color: var(--muted); font-size: 11px; letter-spacing: 3px; }
+  .stat-card .value { color: var(--text); font-size: 22px; margin-top: 6px; }
+  .stat-card.storm .value { color: #ff8866; }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .controls input {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    font-family: inherit;
+  }
+  .controls input:focus { outline: none; border-color: var(--accent); }
+  .controls .count { color: var(--muted); font-size: 12px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+  th, td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  th {
+    background: rgba(0,0,0,0.2);
+    color: var(--muted);
+    font-weight: normal;
+    letter-spacing: 2px;
+    cursor: pointer;
+    user-select: none;
+  }
+  th.sorted::after { content: ' ▼'; color: var(--accent); }
+  th.sorted.asc::after { content: ' ▲'; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  td.username { color: var(--accent); }
+  td.actions { text-align: right; }
+  td.actions button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    margin-left: 4px;
+  }
+  td.actions button:hover { border-color: var(--accent); }
+  td.actions button.danger { color: var(--danger); }
+  td.actions button.danger:hover { border-color: var(--danger); }
+
+  .empty { padding: 60px; text-align: center; color: var(--muted); }
+
+  /* Login overlay */
+  #login {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #login.hidden { display: none; }
+  .login-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 32px 40px;
+    width: 360px;
+  }
+  .login-card h2 {
+    margin: 0 0 24px;
+    text-align: center;
+    color: var(--accent);
+    letter-spacing: 6px;
+    font-size: 18px;
+  }
+  .login-card label {
+    display: block; color: var(--muted);
+    font-size: 11px; letter-spacing: 3px;
+    margin-bottom: 6px;
+  }
+  .login-card input {
+    width: 100%;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+  .login-card input:focus { outline: none; border-color: var(--accent); }
+  .login-card button {
+    width: 100%;
+    background: #2a4a8a;
+    border: 1px solid #88c0ff;
+    color: var(--text);
+    padding: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: 4px;
+  }
+  .login-card button:hover { background: #3a5a9a; }
+  .login-card .err {
+    color: var(--danger);
+    text-align: center;
+    min-height: 18px;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .login-card .host-cfg {
+    margin-top: 18px; padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .login-card .host-cfg label { font-size: 10px; }
+  .login-card .host-cfg input { font-size: 11px; padding: 6px 10px; margin-bottom: 0; }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--accent);
+    color: var(--text); padding: 10px 24px;
+    font-size: 13px; letter-spacing: 2px;
+    opacity: 0; transition: opacity .25s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="login-card">
+    <h2>ETFM ADMIN</h2>
+    <label>管理員密碼</label>
+    <input id="login-pw" type="password" autocomplete="off" autofocus>
+    <div id="login-err" class="err"></div>
+    <button id="login-submit">登入</button>
+    <div class="host-cfg">
+      <label>Server Host</label>
+      <input id="login-host" type="text" autocomplete="off"
+             placeholder="etfm.xxx.partykit.dev">
+    </div>
+  </div>
+</div>
+
+<header style="display:none">
+  <h1>ETFM ADMIN</h1>
+  <span class="host" id="host-label"></span>
+  <div class="spacer"></div>
+  <button id="refresh">重新整理</button>
+  <button id="logout">登出</button>
+</header>
+
+<main style="display:none">
+  <div class="stats" id="stats"></div>
+  <div class="controls">
+    <input id="filter" type="text" placeholder="搜尋帳號 / 顯示名稱…">
+    <span class="count" id="user-count">—</span>
+  </div>
+  <table id="user-table">
+    <thead>
+      <tr>
+        <th data-sort="createdAt" class="sorted">註冊時間</th>
+        <th data-sort="username">帳號</th>
+        <th data-sort="displayName">顯示名稱</th>
+        <th data-sort="money">$存款</th>
+        <th data-sort="maxDist">最遠 (m)</th>
+        <th>動作</th>
+      </tr>
+    </thead>
+    <tbody id="user-rows"></tbody>
+  </table>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const STORAGE_PW = 'etfm-admin-pw';
+const STORAGE_HOST = 'etfm-admin-host';
+const STORAGE_ROOM = 'global';   // matches the client's MP_ROOM
+
+let pw = sessionStorage.getItem(STORAGE_PW) || '';
+let host = localStorage.getItem(STORAGE_HOST) || 'etfm.cooldragon313.partykit.dev';
+let usersCache = [];
+let sortKey = 'createdAt';
+let sortAsc = false;
+
+function apiBase(){
+  if (!host) return null;
+  const proto = host.startsWith('localhost') ? 'http' : 'https';
+  return `${proto}://${host}/parties/main/${STORAGE_ROOM}`;
+}
+
+async function api(path, opts){
+  const r = await fetch(apiBase() + path, {
+    method: (opts && opts.method) || 'GET',
+    headers: {
+      'Authorization': 'Bearer ' + pw,
+      ...((opts && opts.body) ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const body = await r.json().catch(() => ({}));
+  return { status: r.status, body };
+}
+
+function toast(msg, isErr){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderColor = isErr ? 'var(--danger)' : 'var(--accent)';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function showLogin(){
+  document.getElementById('login').classList.remove('hidden');
+  document.querySelector('header').style.display = 'none';
+  document.querySelector('main').style.display = 'none';
+}
+function showDashboard(){
+  document.getElementById('login').classList.add('hidden');
+  document.querySelector('header').style.display = 'flex';
+  document.querySelector('main').style.display = 'block';
+  document.getElementById('host-label').textContent = host;
+}
+
+async function tryLogin(){
+  const err = document.getElementById('login-err');
+  err.textContent = '';
+  const pwIn   = document.getElementById('login-pw').value;
+  const hostIn = document.getElementById('login-host').value.trim();
+  if (!pwIn){ err.textContent = '密碼必填'; return; }
+  if (!hostIn){ err.textContent = 'Host 必填'; return; }
+  pw = pwIn;
+  host = hostIn;
+  const r = await api('/admin/stats');
+  if (r.status !== 200 || !r.body.ok){
+    err.textContent = r.body.message || `登入失敗 (HTTP ${r.status})`;
+    return;
+  }
+  sessionStorage.setItem(STORAGE_PW, pw);
+  localStorage.setItem(STORAGE_HOST, host);
+  showDashboard();
+  renderStats(r.body);
+  await loadUsers();
+}
+
+async function loadStats(){
+  const r = await api('/admin/stats');
+  if (r.status === 200 && r.body.ok) renderStats(r.body);
+}
+function renderStats(s){
+  const el = document.getElementById('stats');
+  el.innerHTML = '';
+  const cards = [
+    { label: '註冊帳號', value: s.users },
+    { label: '排行榜紀錄', value: s.scoreboard },
+    { label: '線上玩家', value: s.activePlayers },
+    { label: '已售地塊', value: `${s.ownedPlots} / ${s.totalPlots}` },
+    { label: '活躍死亡寶箱', value: s.activeChests },
+    { label: '暴風雨', value: s.storm ? '進行中' : '無', cls: s.storm ? 'storm' : '' },
+  ];
+  for (const c of cards){
+    const div = document.createElement('div');
+    div.className = 'stat-card ' + (c.cls || '');
+    div.innerHTML = `<div class="label">${c.label}</div><div class="value">${c.value}</div>`;
+    el.appendChild(div);
+  }
+}
+
+async function loadUsers(){
+  const r = await api('/admin/users');
+  if (r.status !== 200 || !r.body.ok){
+    if (r.status === 401){
+      sessionStorage.removeItem(STORAGE_PW);
+      showLogin();
+    }
+    return;
+  }
+  usersCache = r.body.users || [];
+  applyFilter();
+}
+
+function applyFilter(){
+  const q = document.getElementById('filter').value.trim().toLowerCase();
+  let rows = usersCache;
+  if (q){
+    rows = rows.filter(u =>
+      (u.username || '').includes(q) ||
+      (u.displayName || '').toLowerCase().includes(q));
+  }
+  rows = [...rows].sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (av == null) av = '';
+    if (bv == null) bv = '';
+    if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sortAsc ? av - bv : bv - av;
+  });
+  document.getElementById('user-count').textContent = `${rows.length} / ${usersCache.length}`;
+  const tbody = document.getElementById('user-rows');
+  if (rows.length === 0){
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">沒有符合的帳號</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(u => `
+    <tr data-username="${escapeHtml(u.username)}">
+      <td>${u.createdAt ? new Date(u.createdAt).toLocaleString('zh-TW', { hour12: false }) : '—'}</td>
+      <td class="username">${escapeHtml(u.username)}</td>
+      <td>${escapeHtml(u.displayName || '')}</td>
+      <td>$${u.money || 0}</td>
+      <td>${Math.round(u.maxDist || 0)}</td>
+      <td class="actions">
+        <button data-act="reset">重設密碼</button>
+        <button data-act="delete" class="danger">刪除</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function escapeHtml(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+document.getElementById('user-rows').addEventListener('click', async e => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const row = btn.closest('tr');
+  const username = row.dataset.username;
+  if (btn.dataset.act === 'delete'){
+    if (!confirm(`確定要刪除「${username}」？\n會清掉排行榜紀錄、釋出他的地塊、踢掉現場連線。無法復原。`)) return;
+    const r = await api('/admin/users/' + encodeURIComponent(username), { method: 'DELETE' });
+    if (r.status === 200 && r.body.ok){
+      toast(`已刪除 ${username}`);
+      await loadUsers();
+      await loadStats();
+    } else {
+      toast(r.body.message || '刪除失敗', true);
+    }
+  } else if (btn.dataset.act === 'reset'){
+    const np = prompt(`給「${username}」設新密碼（至少 6 字）：\n設完請手動把新密碼告訴他`);
+    if (!np) return;
+    if (np.length < 6){ toast('密碼至少 6 字', true); return; }
+    const r = await api('/admin/users/' + encodeURIComponent(username) + '/reset',
+                       { method: 'POST', body: { password: np } });
+    if (r.status === 200 && r.body.ok){
+      toast(`已重設 ${username} 的密碼`);
+    } else {
+      toast(r.body.message || '重設失敗', true);
+    }
+  }
+});
+
+document.getElementById('user-table').addEventListener('click', e => {
+  const th = e.target.closest('th[data-sort]');
+  if (!th) return;
+  const key = th.dataset.sort;
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = false; }
+  document.querySelectorAll('th[data-sort]').forEach(h => {
+    h.classList.toggle('sorted', h.dataset.sort === sortKey);
+    h.classList.toggle('asc', h.dataset.sort === sortKey && sortAsc);
+  });
+  applyFilter();
+});
+
+document.getElementById('filter').addEventListener('input', applyFilter);
+
+document.getElementById('login-submit').addEventListener('click', tryLogin);
+document.getElementById('login-pw').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); tryLogin(); }
+});
+document.getElementById('login-host').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); tryLogin(); }
+});
+document.getElementById('refresh').addEventListener('click', async () => {
+  await loadStats();
+  await loadUsers();
+  toast('已重新整理');
+});
+document.getElementById('logout').addEventListener('click', () => {
+  pw = '';
+  sessionStorage.removeItem(STORAGE_PW);
+  document.getElementById('login-pw').value = '';
+  showLogin();
+});
+
+// Boot
+document.getElementById('login-host').value = host;
+if (pw){
+  (async () => {
+    const r = await api('/admin/stats');
+    if (r.status === 200 && r.body.ok){
+      showDashboard();
+      renderStats(r.body);
+      await loadUsers();
+    } else {
+      showLogin();
+    }
+  })();
+} else {
+  showLogin();
+}
+</script>
+
+</body>
+</html>
