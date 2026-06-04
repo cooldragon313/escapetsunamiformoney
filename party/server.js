@@ -594,22 +594,45 @@ export default class WorldServer {
           const speed = Math.max(0.30 * wt.speedMul, dist / approach / 60);
 
           const partial = wt.width < RUNWAY_HALF_W * 1.7;
-          const baseX = partial ? (Math.random() * 2 - 1) * (RUNWAY_HALF_W - wt.width/2 - 1) : 0;
-          const lateralAmp = partial ? Math.min(RUNWAY_HALF_W - wt.width/2 - 1, 4 + Math.random() * 6) : 0;
+          // Boosted lateral sweep on narrow waves: amp ×3 vs the old 4-10 range
+          // so they actually chase players who try to hug an edge.
+          const maxAmp = RUNWAY_HALF_W - wt.width/2 - 1;
+          const lateralAmp = partial ? Math.min(maxAmp, 12 + Math.random() * 14) : 0;
 
-          const wave = {
-            id: this.nextWaveId++,
-            waveTypeId: wt.id,
-            speed,
-            fromZ,
-            baseX,
-            lateralAmp,
-            lateralPhase: Math.random() * Math.PI * 2,
-            lateralFreq: 0.5 + Math.random() * 1.0,
-            spawnTime: now,
+          // Twin-narrow waves: when a partial wave rolls, 30% chance to spawn
+          // mirrored pair on opposite sides of the runway so the middle is the
+          // only safe corridor. Storm boosts to 45%.
+          const twinChance = this.storm ? 0.45 : 0.30;
+          const isTwin = partial && Math.random() < twinChance;
+
+          const spawnOne = (xOffset, phaseOffset) => {
+            const baseX = isTwin
+              ? xOffset
+              : (Math.random() * 2 - 1) * maxAmp;
+            const wave = {
+              id: this.nextWaveId++,
+              waveTypeId: wt.id,
+              speed,
+              fromZ,
+              baseX,
+              // Pinched twin waves use a smaller sweep so they stay on their side
+              lateralAmp: isTwin ? Math.min(6, lateralAmp * 0.5) : lateralAmp,
+              lateralPhase: Math.random() * Math.PI * 2 + phaseOffset,
+              lateralFreq: 0.5 + Math.random() * 1.0,
+              spawnTime: now,
+            };
+            this.waves.push(wave);
+            this.broadcast({ type: 'wave_spawn', wave });
           };
-          this.waves.push(wave);
-          this.broadcast({ type: 'wave_spawn', wave });
+
+          if (isTwin){
+            // Place each wave hugging its own runway edge
+            const edgeX = (RUNWAY_HALF_W - wt.width/2 - 1) * 0.7;
+            spawnOne(-edgeX, 0);
+            spawnOne( edgeX, Math.PI);   // opposite phase so they sweep in opposite directions
+          } else {
+            spawnOne(0, 0);
+          }
         }
       }
     }

@@ -374,7 +374,7 @@
 <div id="color-grade"></div>
 
 <div id="resource-bar">
-  <span class="res"><span class="ico">$</span><span id="res-money">0</span></span>
+  <span class="res"><span class="ico">R$</span><span id="res-money">0</span></span>
   <span class="res"><span class="ico">🪵</span><span id="res-wood">0</span></span>
   <span class="res"><span class="ico">🪨</span><span id="res-stone">0</span></span>
   <span class="res"><span class="ico">⚙️</span><span id="res-iron">0</span></span>
@@ -758,7 +758,7 @@ const STATS_BASE = {
   speed: 0.18,
   jump: 0.42,
   diveTime: 4.0,
-  pickupRadius: 1.3,
+  pickupRadius: 0.6,   // base — magnet powerup ×2.5 and pickup-radius upgrades widen it from here
   carryMax: 10,
   strength: 0,
 };
@@ -1465,7 +1465,7 @@ function emitCoinSparkle(x, z){
       vy: 0.7 + Math.random() * 0.5,
       life: 0.9,
       size: 0.18 + Math.random() * 0.08,
-      color: 0xffee88,
+      color: 0xeaf4ff,    // silver-white to match Robux
       shrink: true,
     });
   }
@@ -1676,39 +1676,86 @@ const showPlotSign = refreshPlotVisual;
 // ============================================================
 // COINS — disc / stack / money-bag visual based on value
 // ============================================================
-const coinDiscGeo  = new THREE.CylinderGeometry(0.32, 0.32, 0.08, 16);
-const coinGoldMat  = new THREE.MeshLambertMaterial({ color: 0xffd700 });
-const coinEdgeMat  = new THREE.MeshLambertMaterial({ color: 0xb8860b });
+// Coin geometry — Robux-style "dark hex + white R". The variable names
+// stay as `coinGoldMat` / `coinEdgeMat` because refreshEmissive and other
+// systems already reference them.
+const coinDiscGeo  = new THREE.CylinderGeometry(0.42, 0.42, 0.10, 6);
+const coinGoldMat  = new THREE.MeshLambertMaterial({ color: 0x2a2f37 });   // dark Robux charcoal
+const coinEdgeMat  = new THREE.MeshLambertMaterial({ color: 0x16181d });   // near-black rim
+// Pure-white R, slightly self-illuminated so it pops even when the hex
+// face is in shadow.
+const robuxRMat    = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x666666 });
+
+// The Robux icon's centre is a tilted white square (a diamond), framing
+// a smaller dark inner square so it reads as the Roblox-logo "R bowl"
+// from a distance. Voxel-blocky, no letter drawing.
+function makeRobuxR(){
+  const g = new THREE.Group();
+  const t = 0.05;                         // total raised height above the disc
+  // Outer white diamond
+  const outer = new THREE.Mesh(
+    new THREE.BoxGeometry(0.34, t, 0.34),
+    robuxRMat
+  );
+  outer.position.y = t / 2;
+  outer.rotation.y = Math.PI / 4;         // rotate 45° → diamond
+  g.add(outer);
+  // Inner darker square (the "hole") — uses the disc material so it visually
+  // cuts through, matching the official Robux icon's inset square.
+  const inner = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, t * 1.05, 0.14),
+    coinGoldMat
+  );
+  inner.position.y = t * 0.55;
+  inner.rotation.y = Math.PI / 4;
+  g.add(inner);
+  return g;
+}
+
 function makeCoinMesh(value){
   const v = Math.max(1, value || 1);
   const g = new THREE.Group();
   if (v >= 10){
-    // Money pouch (Σ value 10+)
+    // "Robux loot bag" — keep brown sack silhouette so high-value loot
+    // still looks distinct, but swap the $ for a silver R disc on the front.
     const bag = new THREE.Mesh(
       new THREE.SphereGeometry(0.55, 14, 10),
-      new THREE.MeshLambertMaterial({color: 0x8B4513})
+      new THREE.MeshLambertMaterial({color: 0x6a3a1a})
     );
     bag.scale.y = 0.85;
     bag.position.y = 0.45;
     g.add(bag);
     const tie = new THREE.Mesh(
       new THREE.CylinderGeometry(0.16, 0.22, 0.22, 8),
-      new THREE.MeshLambertMaterial({color: 0x6a3a1a})
+      new THREE.MeshLambertMaterial({color: 0x4d2810})
     );
     tie.position.y = 0.95;
     g.add(tie);
-    // Gold $ symbol
-    const dollar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.04), coinGoldMat);
-    dollar.position.set(0, 0.5, 0.55);
-    g.add(dollar);
+    // Big dark hex Robux on the front face, R facing toward the base
+    const front = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.42, 0.42, 0.10, 6),
+      coinGoldMat
+    );
+    front.rotation.x = Math.PI / 2;        // flat face → forward (toward base)
+    front.position.set(0, 0.5, 0.5);
+    g.add(front);
+    const r = makeRobuxR();
+    r.rotation.x = -Math.PI / 2;           // align block letter to face out
+    r.position.set(0, 0.5, 0.58);
+    g.add(r);
   } else {
-    // Stack of disc coins; height ≈ value
+    // Stack of silver hexagonal Robux discs; one R sits on the top one.
     const n = Math.min(v, 9);
     for (let i = 0; i < n; i++){
       const disc = new THREE.Mesh(coinDiscGeo, coinGoldMat);
       disc.position.y = 0.05 + i * 0.10;
+      // Alternate hex orientation slightly so stacks don't look like one solid block
+      disc.rotation.y = (i % 2) * (Math.PI / 6);
       g.add(disc);
     }
+    const r = makeRobuxR();
+    r.position.y = 0.05 + (n - 1) * 0.10 + 0.045;
+    g.add(r);
   }
   return g;
 }
@@ -3210,9 +3257,15 @@ function update(now){
   //  walking onto an inaccessible pit.)
 
   // ----- Coin pickup -----
-  if (state.alive){
+  // Holding Shift (or the touch sprint button) disables auto-pickup so the
+  // player can blast through low-value zones without filling their bag.
+  // The magnet powerup overrides this — it's meant to vacuum everything.
+  const sprintHeld = (keys['ShiftLeft'] || keys['ShiftRight'] || touchInput.sprint);
+  const magnetActive = (t < state.buffMagnetUntil);
+  const pickupSuppressed = sprintHeld && !magnetActive;
+  if (state.alive && !pickupSuppressed){
     const lootMul = state.storm ? 2 : 1;
-    const magnetMul = (t < state.buffMagnetUntil) ? 2.5 : 1.0;
+    const magnetMul = magnetActive ? 2.5 : 1.0;
     const pickRad = state.pickupRadius * magnetMul;
     const pickRadSq = pickRad * pickRad;
     for (const c of coins){
@@ -4705,8 +4758,9 @@ const PALETTES = {
   shoes:     [0x111111, 0x4a3a1a, 0xc04040, 0xeeeeee, 0xddaa44, 0x4080d0],
 };
 const TUTORIAL_STEPS = [
-  '用 WASD（或左下搖桿）跑出基地，撿沿途的金幣。深區金幣更值錢。',
-  '看到「海嘯警報」會顯示需要的跳高 Lv。跳得夠高就跳過去（綠浪 Lv3 / 藍紅 Lv6 / 紫巨 Lv9 / 黑災 Lv15）；不夠就躲坑。',
+  '用 WASD（或左下搖桿）跑出基地，撿沿途的 R$ 銀幣。深區的更值錢。',
+  '⚡ 按住 Shift（手機點「衝刺」）→ 跑得快但不會自動撿幣，讓你穿越低值區直奔深區。慢走才會自動撿。撿磁鐵道具時例外，磁鐵期間照常吸幣。',
+  '看到「海嘯警報」會顯示需要的跳高 Lv。跳得夠高就跳過去（綠浪 Lv3 / 藍紅 Lv6 / 紫巨 Lv9 / 黑災 Lv15）；不夠就躲坑。⚠ 窄浪現在 30% 機率變雙重夾擊（左右各一條），中間才是安全通道。',
   '坑現在是真的洞 — 跳進去（按 Space）、海嘯過後再跳出來。坑緣顏色標記需要的跳高 Lv（棕 / 綠 / 藍 / 紫 / 紅 …）',
   '跳高不夠的坑「走不過去」— 整個坑當成牆，得繞開或回基地升級跳高。',
   '活著回到山頂（金色光柱）→ 自動把背包換成存款。按 B 開商店升級裝備。',
@@ -5040,11 +5094,12 @@ refreshOutlineSelection = function(){
   outlinePass.selectedObjects = sel;
 };
 refreshEmissive = function(){
-  // MeshLambertMaterial supports emissive (but not emissiveIntensity).
-  // Mutate the shared coin gold materials so every coin instance lights up.
+  // The dark Robux hex stays dark; the white R (its own emissive) does the
+  // bloom work. A very subtle cool glow on the hex keeps it from going
+  // pitch-black in shadow.
   if (state.gfx >= 1){
-    coinGoldMat.emissive.setHex(0x553300);
-    coinEdgeMat.emissive.setHex(0x3a2200);
+    coinGoldMat.emissive.setHex(0x141820);
+    coinEdgeMat.emissive.setHex(0x080a0e);
   } else {
     coinGoldMat.emissive.setHex(0x000000);
     coinEdgeMat.emissive.setHex(0x000000);
