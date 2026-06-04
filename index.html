@@ -7,6 +7,27 @@
 <style>
   body { margin:0; background:#000; color:#eee; font-family: monospace; overflow:hidden; }
   #stage { position: fixed; inset: 0; }
+  /* Cheap color grading + vignette overlay. Toggled by graphics preset; the
+     CSS approach works in every renderer mode (composer or direct render). */
+  #color-grade {
+    position: fixed; inset: 0; pointer-events: none; z-index: 1;
+    opacity: 0; transition: opacity .25s, background .25s;
+    mix-blend-mode: multiply;
+    background:
+      radial-gradient(ellipse at center,
+        rgba(255,238,210,1.0) 30%,
+        rgba(220,170,120,0.95) 65%,
+        rgba(70,40,20,0.85) 100%);
+  }
+  #color-grade.show { opacity: 0.55; }
+  #color-grade.strong { opacity: 0.75; }
+  body.storm #color-grade.show, body.storm #color-grade.strong {
+    background:
+      radial-gradient(ellipse at center,
+        rgba(180,140,200,1.0) 30%,
+        rgba(160,90,90,0.95) 65%,
+        rgba(40,15,30,0.90) 100%);
+  }
   #hud { position: fixed; top: 12px; left: 12px; padding: 10px 14px;
          background: rgba(0,0,0,0.55); border: 2px solid #444; font-size: 14px;
          line-height: 1.7; pointer-events: none; min-width: 220px; }
@@ -350,6 +371,7 @@
 </head>
 <body>
 <div id="stage"></div>
+<div id="color-grade"></div>
 
 <div id="resource-bar">
   <span class="res"><span class="ico">$</span><span id="res-money">0</span></span>
@@ -956,6 +978,14 @@ function applyGraphicsPreset(n){
   // --- Water shader on tsunamis (Cinema only) ---
   refreshWaveMaterials();
 
+  // --- CSS color grade overlay ---
+  const cg = document.getElementById('color-grade');
+  if (cg){
+    cg.classList.remove('show', 'strong');
+    if (state.gfx === 1 || state.gfx === 2) cg.classList.add('show');
+    else if (state.gfx === 3) cg.classList.add('strong');
+  }
+
   // --- HUD label ---
   showGfxLabel();
 }
@@ -1112,6 +1142,352 @@ PLOTS.forEach(p => {
   scene.add(tile);
   p.tile = tile;
 });
+
+// ============================================================
+// WORLD DECORATIONS — scatter props on the grass strips and runway
+// edges so the world feels lived-in. Uses a seeded LCG so the layout
+// is the same every session (no save-game drift).
+// ============================================================
+function makeSeededRng(seed){
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+const propMat = {
+  rockGrey:  new THREE.MeshLambertMaterial({ color: 0x7c7670 }),
+  rockDark:  new THREE.MeshLambertMaterial({ color: 0x4d4843 }),
+  wood:      new THREE.MeshLambertMaterial({ color: 0x6b3f1a }),
+  woodPale:  new THREE.MeshLambertMaterial({ color: 0xa07050 }),
+  leafGreen: new THREE.MeshLambertMaterial({ color: 0x3a7d3a }),
+  leafDead:  new THREE.MeshLambertMaterial({ color: 0x8a6a2a }),
+  crate:     new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
+  crateDark: new THREE.MeshLambertMaterial({ color: 0x5a3a1a }),
+  shellPink: new THREE.MeshLambertMaterial({ color: 0xffc0a8 }),
+  shellWhite:new THREE.MeshLambertMaterial({ color: 0xf0e4d0 }),
+  bone:      new THREE.MeshLambertMaterial({ color: 0xe0d8c0 }),
+};
+function _propBox(w,h,d,mat){
+  return new THREE.Mesh(new THREE.BoxGeometry(w,h,d), mat);
+}
+const PROP_FACTORIES = {
+  rockSmall: () => {
+    const g = new THREE.Group();
+    g.add(_propBox(0.8, 0.5, 0.7, propMat.rockGrey));
+    return g;
+  },
+  rockBig: () => {
+    const g = new THREE.Group();
+    const b1 = _propBox(1.6, 1.2, 1.4, propMat.rockGrey); b1.position.y = 0.6; g.add(b1);
+    const b2 = _propBox(0.9, 0.7, 0.8, propMat.rockDark); b2.position.set(0.4, 1.35, -0.1); g.add(b2);
+    return g;
+  },
+  driftwood: () => {
+    const g = new THREE.Group();
+    const log = _propBox(2.5, 0.4, 0.5, propMat.wood); log.position.y = 0.2; g.add(log);
+    const stub = _propBox(0.3, 0.25, 0.35, propMat.woodPale); stub.position.set(-1.0, 0.45, 0.1); g.add(stub);
+    return g;
+  },
+  palmStump: () => {
+    const g = new THREE.Group();
+    const stump = _propBox(0.8, 1.6, 0.8, propMat.wood); stump.position.y = 0.8; g.add(stump);
+    const leaf = _propBox(2.0, 0.15, 0.4, propMat.leafDead); leaf.position.set(0.5, 1.7, 0); leaf.rotation.z = -0.4; g.add(leaf);
+    return g;
+  },
+  brokenPalm: () => {
+    const g = new THREE.Group();
+    const trunk = _propBox(0.6, 4.5, 0.6, propMat.wood); trunk.position.y = 2.25; trunk.rotation.z = 0.2; g.add(trunk);
+    for (let i = 0; i < 3; i++){
+      const f = _propBox(1.8, 0.12, 0.35, propMat.leafGreen);
+      f.position.set(0.7 + Math.sin(i) * 0.3, 4.6, (i - 1) * 0.5);
+      f.rotation.set(0.1, i * 1.2, -0.3);
+      g.add(f);
+    }
+    return g;
+  },
+  crate: () => {
+    const g = new THREE.Group();
+    const box = _propBox(1.2, 1.2, 1.2, propMat.crate); box.position.y = 0.6; g.add(box);
+    // Plank lines
+    const lh1 = _propBox(1.25, 0.1, 1.25, propMat.crateDark); lh1.position.y = 0.3; g.add(lh1);
+    const lh2 = _propBox(1.25, 0.1, 1.25, propMat.crateDark); lh2.position.y = 0.9; g.add(lh2);
+    return g;
+  },
+  brokenCrate: () => {
+    const g = new THREE.Group();
+    const part1 = _propBox(0.9, 0.5, 1.0, propMat.crate); part1.position.set(0, 0.25, 0); g.add(part1);
+    const part2 = _propBox(0.6, 0.3, 0.5, propMat.crateDark); part2.position.set(0.8, 0.15, 0.4); part2.rotation.z = 0.3; g.add(part2);
+    return g;
+  },
+  shell: () => {
+    const g = new THREE.Group();
+    const body = _propBox(0.45, 0.15, 0.45, propMat.shellPink); body.position.y = 0.075; g.add(body);
+    const top  = _propBox(0.25, 0.10, 0.25, propMat.shellWhite); top.position.y = 0.20; g.add(top);
+    return g;
+  },
+  bones: () => {
+    const g = new THREE.Group();
+    const b1 = _propBox(0.6, 0.12, 0.12, propMat.bone); b1.position.y = 0.06; g.add(b1);
+    const b2 = _propBox(0.5, 0.12, 0.12, propMat.bone); b2.position.set(0.1, 0.06, 0.3); b2.rotation.y = 0.6; g.add(b2);
+    return g;
+  },
+};
+// Big landmark prop factories — these are noticeably larger than the
+// regular debris so the world has visible silhouettes at distance.
+PROP_FACTORIES.shipwreck = () => {
+  const g = new THREE.Group();
+  const hull = _propBox(6, 2.2, 2.5, propMat.wood); hull.position.y = 1.1; hull.rotation.z = 0.18; g.add(hull);
+  const hull2 = _propBox(4, 1.6, 2.3, propMat.woodPale); hull2.position.set(2.5, 1.6, 0); hull2.rotation.z = 0.18; g.add(hull2);
+  const mast = _propBox(0.4, 5, 0.4, propMat.wood); mast.position.set(0, 3, 0); mast.rotation.z = 0.4; g.add(mast);
+  const sail = _propBox(2.2, 2.2, 0.08, propMat.shellWhite); sail.position.set(0.9, 4, 0); sail.rotation.z = 0.4; g.add(sail);
+  return g;
+};
+PROP_FACTORIES.whaleBones = () => {
+  const g = new THREE.Group();
+  const spine = _propBox(7, 0.4, 0.4, propMat.bone); spine.position.y = 1; g.add(spine);
+  for (let i = -3; i <= 3; i++){
+    const rib = _propBox(0.25, 3, 0.25, propMat.bone);
+    rib.position.set(i * 1, 1.5, 0);
+    rib.rotation.z = 0.2 * Math.sin(i * 0.5);
+    g.add(rib);
+  }
+  const skull = _propBox(2, 1.6, 1.4, propMat.bone); skull.position.set(3.8, 0.8, 0); g.add(skull);
+  return g;
+};
+PROP_FACTORIES.bigBoulder = () => {
+  const g = new THREE.Group();
+  const b1 = _propBox(3.5, 2.8, 3, propMat.rockGrey); b1.position.y = 1.4; g.add(b1);
+  const b2 = _propBox(2.2, 1.6, 2, propMat.rockDark); b2.position.set(0.8, 2.6, -0.3); g.add(b2);
+  const b3 = _propBox(1.5, 1, 1.4, propMat.rockGrey); b3.position.set(-1.0, 2.5, 0.5); g.add(b3);
+  return g;
+};
+PROP_FACTORIES.brokenStatue = () => {
+  const g = new THREE.Group();
+  const base = _propBox(2, 1, 2, propMat.rockGrey); base.position.y = 0.5; g.add(base);
+  const torso = _propBox(1.4, 2.2, 1.2, propMat.rockGrey); torso.position.y = 2.1; torso.rotation.z = 0.15; g.add(torso);
+  const head = _propBox(1, 1, 1, propMat.rockDark); head.position.set(1.6, 3.5, 0); head.rotation.z = -0.5; g.add(head);
+  return g;
+};
+PROP_FACTORIES.tikiTotem = () => {
+  const g = new THREE.Group();
+  const colours = [0xb04030, 0xeec040, 0x4080c0, 0x60aa50];
+  for (let i = 0; i < 4; i++){
+    const seg = _propBox(0.9, 0.9, 0.9,
+      new THREE.MeshLambertMaterial({ color: colours[i % colours.length] }));
+    seg.position.y = 0.45 + i * 0.9;
+    g.add(seg);
+  }
+  const hat = _propBox(1.3, 0.3, 1.3, propMat.wood); hat.position.y = 4.0; g.add(hat);
+  return g;
+};
+
+function scatterProps(){
+  const rng = makeSeededRng(0xC0FFEE);
+  // Density by zone — deeper into the danger zone = more wrecked debris.
+  // Bumped 4-6x over the first pass so each zone visibly has stuff in it.
+  const ZONE_PROPS = [
+    { zone:0, density:6,  weights:{ rockSmall:3, shell:6, driftwood:3, bones:0,  palmStump:2, brokenPalm:1, crate:2, brokenCrate:0, rockBig:1, tikiTotem:1 }},
+    { zone:1, density:7,  weights:{ rockSmall:3, shell:4, driftwood:4, bones:1,  palmStump:3, brokenPalm:2, crate:2, brokenCrate:1, rockBig:1 }},
+    { zone:2, density:8,  weights:{ rockSmall:3, shell:2, driftwood:4, bones:2,  palmStump:2, brokenPalm:2, crate:1, brokenCrate:3, rockBig:2 }},
+    { zone:3, density:8,  weights:{ rockSmall:3, shell:1, driftwood:3, bones:3,  palmStump:1, brokenPalm:3, crate:1, brokenCrate:3, rockBig:2 }},
+    { zone:4, density:9,  weights:{ rockSmall:3, shell:0, driftwood:3, bones:4,  palmStump:1, brokenPalm:3, crate:0, brokenCrate:4, rockBig:3 }},
+    { zone:5, density:9,  weights:{ rockSmall:2, shell:0, driftwood:2, bones:5,  palmStump:0, brokenPalm:2, crate:0, brokenCrate:4, rockBig:4 }},
+    { zone:6, density:8,  weights:{ rockSmall:2, shell:0, driftwood:1, bones:6,  palmStump:0, brokenPalm:1, crate:0, brokenCrate:3, rockBig:5 }},
+    { zone:7, density:7,  weights:{ rockSmall:2, shell:0, driftwood:1, bones:7,  palmStump:0, brokenPalm:1, crate:0, brokenCrate:2, rockBig:5 }},
+    { zone:8, density:6,  weights:{ rockSmall:1, shell:0, driftwood:1, bones:8,  palmStump:0, brokenPalm:0, crate:0, brokenCrate:1, rockBig:6 }},
+    { zone:9, density:5,  weights:{ rockSmall:1, shell:0, driftwood:0, bones:10, palmStump:0, brokenPalm:0, crate:0, brokenCrate:1, rockBig:7 }},
+  ];
+  for (const conf of ZONE_PROPS){
+    const zStart = -conf.zone * ZONE_LEN;
+    const zEnd   = -(conf.zone + 1) * ZONE_LEN;
+    const length = Math.abs(zEnd - zStart);
+    const count  = Math.round(length / 40 * conf.density);
+    const pool = [];
+    for (const [k, w] of Object.entries(conf.weights)){
+      for (let i = 0; i < w; i++) pool.push(k);
+    }
+    if (!pool.length) continue;
+    for (let i = 0; i < count; i++){
+      const type = pool[Math.floor(rng() * pool.length)];
+      const side = rng() < 0.5 ? -1 : 1;
+      // Wider scatter band + closer to runway for visibility from the path
+      const x = side * (23 + rng() * 38);
+      const z = zStart - rng() * length;
+      const prop = PROP_FACTORIES[type]();
+      prop.position.set(x, 0, z);
+      prop.rotation.y = rng() * Math.PI * 2;
+      // Bigger so they read from a distance
+      const s = 1.4 + rng() * 0.8;
+      prop.scale.set(s, s, s);
+      scene.add(prop);
+    }
+  }
+
+  // ===== Landmarks — guaranteed BIG silhouettes at fixed zones =====
+  // Stranded shipwreck in zone 2 (~400m), whale bones in zone 4 (~800m),
+  // broken statue in zone 6 (~1200m), giant boulders peppered throughout.
+  const LANDMARKS = [
+    { type:'shipwreck',    x: -42, z:  -320, ry:  0.4, s: 2.5 },
+    { type:'shipwreck',    x:  45, z:  -540, ry: -0.8, s: 2.2 },
+    { type:'whaleBones',   x: -48, z:  -780, ry:  0.2, s: 1.8 },
+    { type:'brokenStatue', x:  46, z: -1020, ry:  0.6, s: 2.0 },
+    { type:'brokenStatue', x: -50, z: -1280, ry: -0.3, s: 2.0 },
+    { type:'bigBoulder',   x: -38, z:  -150, ry:  0.0, s: 1.5 },
+    { type:'bigBoulder',   x:  40, z:  -260, ry:  0.5, s: 1.8 },
+    { type:'bigBoulder',   x: -44, z:  -680, ry: -0.4, s: 2.0 },
+    { type:'bigBoulder',   x:  48, z:  -900, ry:  0.2, s: 2.2 },
+    { type:'bigBoulder',   x: -45, z: -1450, ry:  0.1, s: 2.5 },
+    { type:'bigBoulder',   x:  42, z: -1700, ry: -0.2, s: 2.5 },
+    { type:'tikiTotem',    x: -28, z:   -40, ry:  0.0, s: 1.0 },
+    { type:'tikiTotem',    x:  28, z:   -40, ry:  0.0, s: 1.0 },
+  ];
+  for (const lm of LANDMARKS){
+    const prop = PROP_FACTORIES[lm.type]();
+    prop.position.set(lm.x, 0, lm.z);
+    prop.rotation.y = lm.ry;
+    prop.scale.set(lm.s, lm.s, lm.s);
+    scene.add(prop);
+  }
+
+  // Plaza beach: lots of shells + small driftwood for a beach feel
+  for (let i = 0; i < 36; i++){
+    const ang = rng() * Math.PI * 2;
+    const r = 36 + rng() * 22;
+    const x = Math.cos(ang) * r;
+    const z = PLAZA_CENTER_Z + Math.sin(ang) * r * 0.4;
+    if (Math.abs(x) < PLAZA_HALF_W + 2 && z > PLAZA_Z_START - 6 && z < PLAZA_Z_END + 6) continue;
+    const type = rng() < 0.7 ? 'shell' : 'driftwood';
+    const prop = PROP_FACTORIES[type]();
+    prop.position.set(x, 0, z);
+    prop.rotation.y = rng() * Math.PI * 2;
+    const s = 0.9 + rng() * 0.4;
+    prop.scale.set(s, s, s);
+    scene.add(prop);
+  }
+}
+scatterProps();
+
+// ============================================================
+// PARTICLE SYSTEM — pooled, used for footstep dust, coin sparkles,
+// and wave splashes. Each particle is a small textureless cube so
+// it stays voxel-consistent.
+// ============================================================
+const PARTICLE_MAX = 160;
+const particles = [];
+const particlePool = [];
+const _particleGeo = new THREE.BoxGeometry(1, 1, 1);
+function _allocParticle(){
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 1, fog: true, depthWrite: false,
+  });
+  const p = {
+    mesh: new THREE.Mesh(_particleGeo, mat),
+    vx:0, vy:0, vz:0, life:0, maxLife:0, gravity:0, shrink:false, baseSize:0,
+  };
+  p.mesh.visible = false;
+  p.mesh.renderOrder = 2;
+  scene.add(p.mesh);
+  return p;
+}
+function spawnParticle(o){
+  let p;
+  if (particlePool.length){
+    p = particlePool.pop();
+  } else if (particles.length < PARTICLE_MAX){
+    p = _allocParticle();
+  } else {
+    // Recycle the oldest
+    p = particles.shift();
+  }
+  p.mesh.position.set(o.x, o.y, o.z);
+  const s = o.size || 0.2;
+  p.baseSize = s;
+  p.mesh.scale.set(s, s, s);
+  p.mesh.material.color.setHex(o.color || 0xffffff);
+  p.mesh.material.opacity = o.opacity != null ? o.opacity : 1;
+  p.mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+  p.mesh.visible = true;
+  p.vx = o.vx || 0;
+  p.vy = o.vy || 0;
+  p.vz = o.vz || 0;
+  p.life = p.maxLife = o.life || 0.6;
+  p.gravity = o.gravity || 0;
+  p.shrink = !!o.shrink;
+  particles.push(p);
+}
+function tickParticles(dt){
+  for (let i = particles.length - 1; i >= 0; i--){
+    const p = particles[i];
+    p.life -= dt;
+    if (p.life <= 0){
+      p.mesh.visible = false;
+      particlePool.push(p);
+      particles.splice(i, 1);
+      continue;
+    }
+    p.vy -= p.gravity * dt;
+    p.mesh.position.x += p.vx * dt;
+    p.mesh.position.y += p.vy * dt;
+    p.mesh.position.z += p.vz * dt;
+    if (p.mesh.position.y < 0){ p.mesh.position.y = 0; p.vy = 0; p.vx *= 0.5; p.vz *= 0.5; }
+    const frac = p.life / p.maxLife;
+    p.mesh.material.opacity = frac;
+    if (p.shrink) p.mesh.scale.setScalar(p.baseSize * frac);
+  }
+}
+
+function emitDust(x, z){
+  for (let i = 0; i < 4; i++){
+    spawnParticle({
+      x: x + (Math.random() - 0.5) * 0.8,
+      y: 0.15,
+      z: z + (Math.random() - 0.5) * 0.8,
+      vx: (Math.random() - 0.5) * 2.2,
+      vy: 1.2 + Math.random() * 1.0,
+      vz: (Math.random() - 0.5) * 2.2,
+      gravity: 2.0,
+      life: 0.7,
+      size: 0.35 + Math.random() * 0.20,
+      color: 0xd9b96a,
+      shrink: true,
+    });
+  }
+}
+function emitCoinSparkle(x, z){
+  for (let i = 0; i < 2; i++){
+    const ang = Math.random() * Math.PI * 2;
+    const r = 0.5 + Math.random() * 0.6;
+    spawnParticle({
+      x: x + Math.cos(ang) * r,
+      y: 0.8 + Math.random() * 0.8,
+      z: z + Math.sin(ang) * r,
+      vy: 0.7 + Math.random() * 0.5,
+      life: 0.9,
+      size: 0.18 + Math.random() * 0.08,
+      color: 0xffee88,
+      shrink: true,
+    });
+  }
+}
+function emitWaveSplash(x, z, wallW){
+  const count = Math.min(40, Math.max(20, Math.round(wallW * 1.0)));
+  for (let i = 0; i < count; i++){
+    spawnParticle({
+      x: x + (Math.random() - 0.5) * wallW,
+      y: 0.6,
+      z: z + (Math.random() - 0.5) * 2.5,
+      vx: (Math.random() - 0.5) * 5,
+      vy: 4 + Math.random() * 5,
+      vz: (Math.random() - 0.5) * 4 + 2,
+      gravity: 10,
+      life: 1.0 + Math.random() * 0.4,
+      size: 0.45 + Math.random() * 0.25,
+      color: 0xffffff,
+      shrink: true,
+    });
+  }
+}
 
 // ============================================================
 // BUILD ITEMS — modular pieces players assemble on their plots
@@ -3093,6 +3469,16 @@ function update(now){
     ts.obj.foam.forEach(f => {
       f.position.y = foamBaseY + Math.sin(t * 4 + f.userData.phase) * 0.3;
     });
+    // Wave splash on first crossing of the runway centre — big white burst
+    if (!ts.splashed && ts.obj.group.position.z > -400){
+      ts.splashed = true;
+      emitWaveSplash(ts.obj.group.position.x, ts.obj.group.position.z - 1.5, ts.obj.wallW);
+    }
+    // A second smaller splash when the wave reaches the safety zone
+    if (!ts.splashedNear && ts.obj.group.position.z > -20){
+      ts.splashedNear = true;
+      emitWaveSplash(ts.obj.group.position.x, ts.obj.group.position.z - 1.5, ts.obj.wallW * 0.8);
+    }
     // Collision: in-pit (y < -0.3) is safe; jumped above low waves is safe
     if (state.alive && player.position.z < SAFETY_LINE_Z && player.position.y >= -0.3){
       const dz = player.position.z - ts.obj.group.position.z;
@@ -3176,6 +3562,27 @@ function update(now){
       c.mesh.position.y = 0.4 + Math.sin(t * 3 + c.x) * 0.12;
     }
   }
+  // Coin sparkles — randomly emit on a few uncollected coins near the player
+  state._sparkleAccum = (state._sparkleAccum || 0) + dt;
+  if (state._sparkleAccum > 0.10){
+    state._sparkleAccum = 0;
+    const px = player.position.x, pz = player.position.z;
+    for (let i = 0; i < 3; i++){
+      const c = coins[Math.floor(Math.random() * coins.length)];
+      if (!c || c.collected) continue;
+      const dx = c.x - px, dz = c.z - pz;
+      if (dx*dx + dz*dz > 60 * 60) continue;   // off-camera, skip
+      emitCoinSparkle(c.x, c.z);
+    }
+    // And one on the big treasure if present
+    if (bigTreasureMesh){
+      const m = bigTreasureMesh.position;
+      const dx = m.x - px, dz = m.z - pz;
+      if (dx*dx + dz*dz < 100 * 100){
+        emitCoinSparkle(m.x + (Math.random() - 0.5) * 2, m.z + (Math.random() - 0.5) * 2);
+      }
+    }
+  }
 
   // ----- Big treasure animation -----
   if (bigTreasureMesh){
@@ -3209,6 +3616,16 @@ function update(now){
   // Multiplayer (interpolate others + send our state)
   tickMultiplayer(dt);
   tickChatBubbles();
+  // Particles always tick (cheap when empty); emit triggers below
+  tickParticles(dt);
+  // ----- Particle emit triggers (gfx-independent so even Off gets a little life) -----
+  if (state._moving && !state.inPit && player && player.position.y < 0.6){
+    state._dustAccum = (state._dustAccum || 0) + dt;
+    if (state._dustAccum > 0.16){
+      state._dustAccum = 0;
+      emitDust(player.position.x, player.position.z);
+    }
+  }
   if (state.gamePhase === 'playing') maybeReportScore();
 
   if (state.gamePhase === 'playing') updateHUD();
@@ -4181,14 +4598,16 @@ function mpHandleMessage(raw){
     }
   } else if (msg.type === 'storm_start'){
     state.storm = true;
-    scene.background = new THREE.Color(0x4a3030);
+    if (state.gfx < 2) scene.background = new THREE.Color(0x4a3030);
     scene.fog.color.setHex(0x4a3030);
+    document.body.classList.add('storm');
     toast('⚡ 暴風雨來臨！海浪頻繁、寶藏倍增 ⚡');
     sfx.stormStart();
   } else if (msg.type === 'storm_end'){
     state.storm = false;
-    scene.background = new THREE.Color(0x87ceeb);
-    scene.fog.color.setHex(0x87ceeb);
+    if (state.gfx < 2) scene.background = new THREE.Color(0x87ceeb);
+    scene.fog.color.setHex(state.gfx >= 2 ? 0xa0d8f0 : 0x87ceeb);
+    document.body.classList.remove('storm');
     toast('海面恢復平靜');
     sfx.stormEnd();
   }
